@@ -1,92 +1,127 @@
 # 练秋湖 IOC AI 执行器（第一阶段）
 
-这是一个独立、轻量的 Node.js 执行器：接收 OSCA 发来的 HTTP JSON 指令数组，完成基础校验后，将该数组原样发布到 EMQX Cloud MQTT Topic。
+独立、轻量的 Node.js 执行器。它接收结构化 JSON 指令数组，经 HTTP POST 和基础结构校验后，将完整数组一次发布到 MQTT Broker。
 
-## 职责与边界
-
-已确定职责：HTTP 接收、指令结构校验、MQTT TLS 长连接/自动重连、以 QoS 0 且 `retain=false` 发布。
-
-本阶段不负责 OSCA 核心或 YAML、Vue 前端和前端指令映射、EMQX Cloud 实例/ACL、正式指令集、HTTP 鉴权、ACK、消息缓存、去重、重试、Docker/PM2/systemd 部署。不会补充 `request_id`、时间戳或终端标识等业务字段。
-
-## 安装与配置
-
-需要 Node.js 18 或更高版本。
-
-Windows PowerShell：
-
-```powershell
-npm install
-Copy-Item .env.example .env
+```text
+结构化 JSON → HTTP POST → Node.js 执行器 → 基础校验 → MQTT publish → MQTT Broker
 ```
 
-Windows CMD：
+执行器不转换业务参数、不解释具体业务 `action`、不调用 IOC 页面或 UE API；多条指令不会拆分发送。当前 `action` / `params` 属于临时联调协议，并非正式业务协议。
 
-```cmd
-npm install
-copy .env.example .env
-```
+## Git 与分支
 
-编辑 `.env`，填写实际 MQTT TLS 连接信息。`.env` 已被 Git 忽略，不能提交。必须配置 `MQTT_URL`、`MQTT_USERNAME`、`MQTT_PASSWORD`、`MQTT_TOPIC`；启动仅接受 `MQTT_QOS=0`、`MQTT_RETAIN=false`，其他值会明确失败。
+GitHub 仓库：`StrawHat-Kid/lianqiuhu-ioc-executor`（Private）。
+
+- `master`：稳定部署分支，产品部署环境使用。
+- `develop`：日常开发分支；新功能和修改先在此完成，人工及联调验证通过后再合并到 `master`。
+
+## 快速启动
+
+要求：Node.js `>=18`。仓库未声明固定 npm 版本。
 
 ```bash
+npm install
 npm start
 ```
 
-日志只记录 MQTT 的协议、主机和端口，不记录 URL 中可能出现的凭据，也不会输出密码。
+实际入口为 `src/server.js`。项目不需要 build 或编译，也不要求 PM2、nodemon 或其它全局安装工具。
 
-## 接口
+部署时从稳定分支拉取后，检查 `.env`，再安装并启动：
 
-`GET /health` 始终显示 HTTP 服务状态，并以 `mqttConnected` 明确 MQTT 是否已连上。MQTT 断开时示例：
+```bash
+git pull origin master
+npm install
+npm start
+```
+
+## 配置
+
+当前仓库没有 `.env.example`。`.env` 已被 Git 跟踪并提交到 Private 仓库，供部署人员查看和配置。
+
+`.env` 包含 MQTT 地址、用户名和密码等敏感配置，因此仓库必须保持 Private，不能直接改为 Public；文档中也不得回显真实用户名或密码。
+
+| 变量 | 作用 |
+| --- | --- |
+| `PORT` | HTTP 服务端口，默认 `8008` |
+| `MQTT_URL` | MQTT TLS Broker 地址，必须使用 `mqtts://` |
+| `MQTT_USERNAME` | MQTT 用户名 |
+| `MQTT_PASSWORD` | MQTT 密码 |
+| `MQTT_TOPIC` | MQTT 发布 Topic |
+| `MQTT_QOS` | MQTT QoS，当前仅支持 `0` |
+| `MQTT_RETAIN` | retain，当前仅支持 `false` |
+
+除 `PORT` 外，MQTT 配置缺失会导致启动时的配置校验失败。
+
+## HTTP 接口
+
+默认地址：`http://127.0.0.1:8008`。
+
+### `GET /health`
+
+`/health` 始终返回 HTTP 200；部署验收必须重点检查 `mqttConnected` 和 `status`。HTTP 服务正常不等于 MQTT 已连接。
+
+MQTT 已连接：
+
+```json
+{"ok":true,"mqttConnected":true,"status":"ready"}
+```
+
+MQTT 未连接：
 
 ```json
 {"ok":true,"mqttConnected":false,"status":"mqtt_unavailable"}
 ```
 
-`POST /api/commands` 仅接受非空 JSON 数组；每项必须是普通对象，有非空字符串 `action`；若有 `params`，也必须为普通对象。任一项不合法即返回 400，且不会发布。
+### `POST /api/commands`
 
-合法请求会直接执行 `JSON.stringify(原始数组)` 后一次发布，缺失的 `params` 不会自动补充。MQTT 未连接返回 503；MQTT.js 发布回调报错返回 500；只有回调成功后才返回 200。
+请求应使用 `Content-Type: application/json`，请求体顶层必须为非空数组：
 
-当前 Topic 由 `MQTT_TOPIC` 配置，示例值为 `lianqiuhu/ioc/demo/commands`。发布参数固定 `qos: 0`、`retain: false`。执行器显式关闭 MQTT.js 的 QoS 0 断线排队，连接断开期间的指令不会在重连后补发。
-
-## 请求示例
-
-常规 curl：
-
-```bash
-curl -X POST http://127.0.0.1:8008/api/commands -H "Content-Type: application/json" -d '[{"action":"主题切换","params":{"主题名称":"综合安防"}}]'
+```json
+[
+  {
+    "action": "指令名称",
+    "params": {}
+  }
+]
 ```
 
-Windows PowerShell：
+- `action` 必须为非空字符串。
+- `params` 如存在，必须为普通对象；执行器不校验其中业务字段。
+- 执行器对原始完整数组执行 `JSON.stringify` 后一次 MQTT publish，不修改字段，也不拆分多条指令。
 
-```powershell
-$body = @(@{ action = '主题切换'; params = @{ '主题名称' = '综合安防' } }) | ConvertTo-Json -Depth 4
-Invoke-RestMethod -Uri 'http://127.0.0.1:8008/api/commands' -Method Post -ContentType 'application/json' -Body $body
-```
+结果状态码：成功为 200；请求校验失败为 400；MQTT 未连接为 503；MQTT publish 失败为 500。
 
-也可模拟 OSCA 调用（仅通过 HTTP，不直接调用 MQTT）：
+## MQTT 行为
+
+Node.js 执行器连接可访问的 `mqtts://` MQTT Broker。当前联调使用 EMQX Cloud，但源码不依赖特定 MQTT 云厂商；这与前端可能使用的 MQTT over WSS 无关。
+
+- QoS：`0`
+- retain：`false`
+- `queueQoSZero`：`false`
+- 自动重连：`reconnectPeriod = 1000ms`
+
+MQTT 未连接时，HTTP 指令直接返回 503；断线期间的待执行控制指令不会缓存，重连后也不会补发旧的 QoS 0 指令。
+
+## 验收与测试
+
+最小部署验收：启动后请求 `GET /health`，确认 `mqttConnected:true` 且 `status:ready`。
+
+正式验收脚本：
 
 ```bash
 node scripts/send-test-command.js
 ```
 
-脚本会输出 HTTP 状态和响应 JSON；请求或非 2xx 响应会以非零状态码退出。
+该脚本会真实调用 `http://127.0.0.1:8008/api/commands`，并触发 HTTP → MQTT publish；会输出 HTTP 状态和响应 JSON，非 2xx 时以非零状态码退出。
 
-## 自动化测试
+自动化测试：
 
 ```bash
 npm test
 ```
 
-测试使用 Node.js 内置 `node:test` 和注入的 MQTT Publisher mock，不连接真实 Broker。覆盖健康状态、全部结构校验、原样发布、QoS/retain 固定值、未连接、发布失败、成功和多指令单次发布。
+自动化测试使用 MQTT Publisher mock，不连接真实 Broker。
 
-## 常见错误排查
+## 当前边界
 
-- 启动时报缺失环境变量：复制 `.env.example` 为 `.env` 并填写全部 MQTT 配置。
-- 启动时报 QoS 或 retain 错误：第一阶段只能使用 `0` 和 `false`。
-- 健康检查显示 `mqttConnected:false`：核对 Broker 地址、TLS 端口、用户名密码、网络与 EMQX ACL。
-- 指令返回 400：请求顶层必须是非空数组，且每项需要非空 `action`。
-- 指令返回 503：HTTP 服务正常，但 MQTT 尚未连接；不会伪造发布成功。
-
-## 当前限制与待确认事项
-
-HTTP 鉴权方式、OSCA 最终请求格式/请求头/超时和部署位置、正式 HTTP 地址端口、正式指令集及参数定义、EMQX 正式实例与 ACL、环境与终端区分、ACK/去重/缓存/重试/串行策略及部署方式，均仍等待产品部确认；本轮未实现，也未自行假设。
+本阶段不负责 Vue 前端、IOC 页面或 UE API 调用、正式指令集、HTTP 鉴权、ACK、消息缓存、去重、重试、Docker/PM2/systemd 部署等能力，也不会补充 `request_id`、时间戳或终端标识等业务字段。
