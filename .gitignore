@@ -1,0 +1,11 @@
+node_modules/
+logs/
+*.log
+coverage/
+tmp/
+temp/
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+npm-debug.log*

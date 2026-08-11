@@ -1,0 +1,19 @@
+{
+  "name": "lianqiuhu-ioc-executor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "练秋湖 IOC AI HTTP 到 MQTT 执行器（第一阶段）",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "mqtt": "^5.10.4"
+  }
+}
