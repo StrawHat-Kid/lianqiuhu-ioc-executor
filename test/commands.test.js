@@ -5,6 +5,7 @@ const { createApp } = require('../src/server');
 const { createMqttPublisher } = require('../src/mqtt-client');
 const { readConfig, sanitizeMqttUrl } = require('../src/config');
 const { validateFrontendCommands } = require('../src/validation');
+const { HC_BUSINESS_REGISTRY, HC_COMMAND_REGISTRY } = require('../src/hc-command-registry');
 
 function createPublisher({ connected = true, publishError = null } = {}) {
   const calls = [];
@@ -121,15 +122,99 @@ test('valid 取消园区实时运营情况 expands to the real cancel lifecycle 
   }]);
 });
 
-test('AI节能助手 start and cancel both include its required theme switch and frozen lifecycle command', async () => {
+test('AI节能助手 start uses the frozen full Scenario and cancel uses its parent lifecycle command', async () => {
   const publisher = createPublisher();
   for (const [action, command] of [['启动AI节能助手', 'start'], ['取消AI节能助手', 'cancel']]) {
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
     assert.equal(response.status, 200);
-    assert.deepEqual(JSON.parse(publisher.calls.at(-1)), [
+    assert.deepEqual(JSON.parse(publisher.calls.at(-1)), command === 'start' ? [
       { action: '主题切换', params: { '主题名称': '能源管理' } },
-      { action: 'executeCapability', params: { capability: 'energy.aiEnergyAssistant', command } }
+      { action: 'executeCapability', params: { capability: 'energy.aiEnergyAssistant', command: 'start' } },
+      { action: 'executeOperation', params: { capability: 'energy.aiEnergyAssistant', operation: 'deviceStatusSliders', command: 'demonstrate' } }
+    ] : [
+      { action: 'executeCapability', params: { capability: 'energy.aiEnergyAssistant', command: 'cancel' } }
     ]);
+  }
+});
+
+const frontendCommand = (action, params) => ({ action, params });
+const frontendCapability = (capability, command) => frontendCommand('executeCapability', { capability, command });
+const frontendTheme = (name) => frontendCommand('主题切换', { '主题名称': name });
+
+// 该表独立于执行器 Registry：它锁定项目负责人给定的 17 个 OSCA 名称及前端冻结展开结果。
+const expectedBusinessDefinitions = [
+  ['园区实时运营情况', [frontendCapability('situation.parkRealTimeOperation', 'start')], [frontendCapability('situation.parkRealTimeOperation', 'cancel')]],
+  ['未佩戴安全帽告警', [frontendTheme('综合安防'), frontendCapability('security.noHardHatAlert', 'start')], [frontendCapability('security.noHardHatAlert', 'cancel')]],
+  ['火灾预警', [frontendTheme('综合安防'), frontendCapability('security.fireAlarmAlert', 'start'), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'open' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'close' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyTeam', command: 'notify' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'smsNotification', command: 'notify', radius: 100 })], [frontendCapability('security.fireAlarmAlert', 'cancel')]],
+  ['智慧考勤统计', [frontendTheme('便捷通行'), frontendCapability('access.smartAttendanceAlert', 'start')], [frontendCapability('access.smartAttendanceAlert', 'cancel')]],
+  ['资产盘点', [frontendTheme('资产管理'), frontendCapability('asset.assetInventory', 'start'), frontendCommand('executeOperation', { capability: 'asset.assetInventory', operation: 'trajectory', command: 'toggle' })], [frontendCapability('asset.assetInventory', 'cancel')]],
+  ['资产非法外出告警', [frontendTheme('资产管理'), frontendCapability('asset.illegalOutingAlert', 'start')], [frontendCapability('asset.illegalOutingAlert', 'cancel')]],
+  ['设备巡检告警', [frontendTheme('设施管理'), frontendCapability('facility.equipmentInspectionAlert', 'start'), frontendCommand('executeOperation', { capability: 'facility.equipmentInspectionAlert', operation: 'remoteDiagnosis', command: 'open' }), frontendCommand('executeOperation', { capability: 'facility.equipmentInspectionAlert', operation: 'meeting', command: 'invite' })], [frontendCapability('facility.equipmentInspectionAlert', 'cancel')]],
+  ['AI节能助手', [frontendTheme('能源管理'), frontendCapability('energy.aiEnergyAssistant', 'start'), frontendCommand('executeOperation', { capability: 'energy.aiEnergyAssistant', operation: 'deviceStatusSliders', command: 'demonstrate' })], [frontendCapability('energy.aiEnergyAssistant', 'cancel')]],
+  ['AI算法', [frontendTheme('能源管理'), frontendCapability('energy.aiAlgorithm', 'start')], [frontendCapability('energy.aiAlgorithm', 'cancel')]],
+  ['能流分析', [frontendTheme('能源管理'), frontendCapability('energy.energyFlow', 'start')], [frontendCapability('energy.energyFlow', 'cancel')]],
+  ['光伏监测', [frontendTheme('能源管理'), frontendCapability('energy.photovoltaicMonitoring', 'start')], [frontendCapability('energy.photovoltaicMonitoring', 'cancel')]],
+  ['充电桩管理', [frontendTheme('能源管理'), frontendCapability('energy.chargingPileManagement', 'start')], [frontendCapability('energy.chargingPileManagement', 'cancel')]],
+  ['VIP会议室', [frontendTheme('办公会议'), frontendCapability('office.harmonyMeetingRoom', 'start')], [frontendCapability('office.harmonyMeetingRoom', 'cancel')]],
+  ['Wi-Fi防偷拍检测', [frontendTheme('办公会议'), frontendCapability('office.wifiAntiSpyAlert', 'start')], [frontendCapability('office.wifiAntiSpyAlert', 'cancel')]],
+  ['办公网络', [frontendTheme('网络体验'), frontendCapability('network.officeNetwork', 'start')], [frontendCapability('network.officeNetwork', 'cancel')]],
+  ['VIP客户网络异常', [frontendTheme('网络体验'), frontendCapability('network.vipCustomerNetworkAlert', 'start'), frontendCommand('executeOperation', { capability: 'network.vipCustomerNetworkAlert', operation: 'disposal', command: 'execute', userId: 'VIP12-exception' })], [frontendCapability('network.vipCustomerNetworkAlert', 'cancel')]],
+  ['方案架构图', [frontendCapability('global.solutionArchitecture', 'start')], [frontendCapability('global.solutionArchitecture', 'cancel')]]
+];
+
+test('all 17 HC businesses and 34 semantic actions expand to their frozen frontend arrays', async () => {
+  assert.equal(HC_BUSINESS_REGISTRY.length, 17);
+  assert.equal(Object.keys(HC_COMMAND_REGISTRY).length, 34);
+  for (const [name, expectedStart, expectedCancel] of expectedBusinessDefinitions) {
+    for (const [prefix, command, expected] of [['启动', 'start', expectedStart], ['取消', 'cancel', expectedCancel]]) {
+      const action = `${prefix}${name}`;
+      const publisher = createPublisher();
+      const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
+      assert.equal(response.status, 200, action);
+      const expanded = JSON.parse(publisher.calls[0]);
+      assert.deepEqual(expanded, expected, action);
+      assert.equal(validateFrontendCommands(expanded), null, action);
+      assert.equal(publisher.calls[0].includes(action), false, action);
+    }
+  }
+});
+
+test('HC Registry is complete, paired, exact, and contains only valid frontend expansions', () => {
+  const actions = Object.keys(HC_COMMAND_REGISTRY);
+  assert.equal(new Set(actions).size, 34);
+  for (const business of HC_BUSINESS_REGISTRY) {
+    const start = HC_COMMAND_REGISTRY[`启动${business.name}`];
+    const cancel = HC_COMMAND_REGISTRY[`取消${business.name}`];
+    assert.equal(start.businessName, business.name);
+    assert.equal(start.command, 'start');
+    assert.equal(cancel.businessName, business.name);
+    assert.equal(cancel.command, 'cancel');
+    for (const definition of [start, cancel]) {
+      assert.ok(definition.commands.length > 0);
+      assert.equal(validateFrontendCommands(definition.commands), null);
+      for (const item of definition.commands) {
+        assert.ok(item.action);
+        assert.ok(item.params);
+        assert.equal(item.action.includes(definition.businessName), false);
+      }
+    }
+  }
+});
+
+test('all 34 semantic actions reject missing, mismatched, illegal, and uppercase commands', async () => {
+  for (const [action, definition] of Object.entries(HC_COMMAND_REGISTRY)) {
+    const invalidParams = [
+      {},
+      { command: definition.command === 'start' ? 'cancel' : 'start' },
+      { command: 'stop' },
+      { command: definition.command.toUpperCase() }
+    ];
+    for (const params of invalidParams) {
+      const publisher = createPublisher();
+      const response = await request(publisher, 'POST', '/api/commands', [{ action, params }]);
+      assert.equal(response.status, 400, `${action} ${JSON.stringify(params)}`);
+      assert.equal(publisher.calls.length, 0, action);
+    }
   }
 });
 
@@ -149,7 +234,7 @@ test('HC action and command must match exactly', async () => {
 });
 
 test('unregistered and legacy unprefixed HC actions are rejected', async () => {
-  for (const action of ['启动未知业务', '园区实时运营情况']) {
+  for (const action of ['启动未知业务', '取消未知业务', ...HC_BUSINESS_REGISTRY.map((item) => item.name)]) {
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command: 'start' } }]);
     assert.equal(response.status, 400);
