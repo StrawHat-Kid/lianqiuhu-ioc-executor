@@ -105,6 +105,8 @@ test('valid 启动园区实时运营情况 expands to its frozen frontend capabi
   }]);
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(publisher.calls[0]), [{
+    action: '主题切换', params: { '主题名称': '综合态势' }
+  }, {
     action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'start' }
   }]);
   assert.equal(validateFrontendCommands(JSON.parse(publisher.calls[0])), null);
@@ -143,7 +145,7 @@ const frontendTheme = (name) => frontendCommand('主题切换', { '主题名称'
 
 // 该表独立于执行器 Registry：它锁定项目负责人给定的 17 个 OSCA 名称及前端冻结展开结果。
 const expectedBusinessDefinitions = [
-  ['园区实时运营情况', [frontendCapability('situation.parkRealTimeOperation', 'start')], [frontendCapability('situation.parkRealTimeOperation', 'cancel')]],
+  ['园区实时运营情况', [frontendTheme('综合态势'), frontendCapability('situation.parkRealTimeOperation', 'start')], [frontendCapability('situation.parkRealTimeOperation', 'cancel')]],
   ['未佩戴安全帽告警', [frontendTheme('综合安防'), frontendCapability('security.noHardHatAlert', 'start')], [frontendCapability('security.noHardHatAlert', 'cancel')]],
   ['火灾预警', [frontendTheme('综合安防'), frontendCapability('security.fireAlarmAlert', 'start'), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'open' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'close' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyTeam', command: 'notify' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'smsNotification', command: 'notify', radius: 100 })], [frontendCapability('security.fireAlarmAlert', 'cancel')]],
   ['智慧考勤统计', [frontendTheme('便捷通行'), frontendCapability('access.smartAttendanceAlert', 'start')], [frontendCapability('access.smartAttendanceAlert', 'cancel')]],

@@ -6,7 +6,7 @@ const theme = (name) => command('主题切换', { '主题名称': name });
 // OSCA 只传本文件中的中文业务名称；capability、operation、固定参数均不得由 OSCA 覆盖。
 const HC_BUSINESS_REGISTRY = Object.freeze([
   Object.freeze({ name: '园区实时运营情况', start: Object.freeze([
-    capability('situation.parkRealTimeOperation', 'start')
+    theme('综合态势'), capability('situation.parkRealTimeOperation', 'start')
   ]), cancel: Object.freeze([capability('situation.parkRealTimeOperation', 'cancel')]) }),
   Object.freeze({ name: '未佩戴安全帽告警', start: Object.freeze([
     theme('综合安防'), capability('security.noHardHatAlert', 'start')
