@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const { createApp } = require('../src/server');
 const { createMqttPublisher } = require('../src/mqtt-client');
 const { readConfig, sanitizeMqttUrl } = require('../src/config');
+const { validateFrontendCommands } = require('../src/validation');
 
 function createPublisher({ connected = true, publishError = null } = {}) {
   const calls = [];
@@ -76,12 +77,11 @@ test('invalid JSON returns 400 without publishing', async () => {
   assert.equal(publisher.calls.length, 0);
 });
 
-test('missing params is allowed and remains missing', async () => {
+test('frontend command is published unchanged for compatible direct callers', async () => {
   const publisher = createPublisher();
-  const commands = [{ action: '主题切换' }];
+  const commands = [{ action: '主题切换', params: { '主题名称': '综合安防' } }];
   assert.equal((await request(publisher, 'POST', '/api/commands', commands)).status, 200);
   assert.equal(publisher.calls[0], JSON.stringify(commands));
-  assert.equal(publisher.calls[0].includes('params'), false);
 });
 
 test('valid request calls MQTT publish', async () => {
@@ -90,11 +90,71 @@ test('valid request calls MQTT publish', async () => {
   assert.equal(publisher.calls.length, 1);
 });
 
-test('published content is direct serialization of original array', async () => {
+test('published compatible frontend content is direct serialization of original array', async () => {
   const publisher = createPublisher();
-  const commands = [{ action: ' a ', params: { value: 1 } }];
+  const commands = [{ action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'start' } }];
   await request(publisher, 'POST', '/api/commands', commands);
   assert.equal(publisher.calls[0], JSON.stringify(commands));
+});
+
+test('valid 启动园区实时运营情况 expands to its frozen frontend capability command', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [{
+    action: '启动园区实时运营情况', params: { command: 'start' }
+  }]);
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(publisher.calls[0]), [{
+    action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'start' }
+  }]);
+  assert.equal(validateFrontendCommands(JSON.parse(publisher.calls[0])), null);
+  assert.equal(publisher.calls[0].includes('启动园区实时运营情况'), false);
+});
+
+test('valid 取消园区实时运营情况 expands to the real cancel lifecycle command', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [{
+    action: '取消园区实时运营情况', params: { command: 'cancel' }
+  }]);
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(publisher.calls[0]), [{
+    action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'cancel' }
+  }]);
+});
+
+test('AI节能助手 start and cancel both include its required theme switch and frozen lifecycle command', async () => {
+  const publisher = createPublisher();
+  for (const [action, command] of [['启动AI节能助手', 'start'], ['取消AI节能助手', 'cancel']]) {
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(publisher.calls.at(-1)), [
+      { action: '主题切换', params: { '主题名称': '能源管理' } },
+      { action: 'executeCapability', params: { capability: 'energy.aiEnergyAssistant', command } }
+    ]);
+  }
+});
+
+test('HC action and command must match exactly', async () => {
+  for (const body of [
+    [{ action: '启动园区实时运营情况', params: { command: 'cancel' } }],
+    [{ action: '取消园区实时运营情况', params: { command: 'start' } }],
+    [{ action: '启动园区实时运营情况', params: { command: 'START' } }],
+    [{ action: '启动园区实时运营情况', params: { command: 'stop' } }],
+    [{ action: '启动园区实时运营情况', params: {} }]
+  ]) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', body);
+    assert.equal(response.status, 400);
+    assert.equal(publisher.calls.length, 0);
+  }
+});
+
+test('unregistered and legacy unprefixed HC actions are rejected', async () => {
+  for (const action of ['启动未知业务', '园区实时运营情况']) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command: 'start' } }]);
+    assert.equal(response.status, 400);
+    assert.equal(publisher.calls.length, 0);
+  }
 });
 
 test('MQTT publisher passes connection and publish options to MQTT.js', async () => {
@@ -167,7 +227,7 @@ test('successful MQTT publish returns 200', async () => {
 
 test('multiple commands are published once as one array', async () => {
   const publisher = createPublisher();
-  const commands = [validCommand, { action: '主题切换', params: { '主题名称': '园区总览' } }];
+  const commands = [validCommand, { action: '主题切换', params: { '主题名称': '能源管理' } }];
   await request(publisher, 'POST', '/api/commands', commands);
   assert.deepEqual(publisher.calls, [JSON.stringify(commands)]);
 });

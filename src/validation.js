@@ -21,4 +21,36 @@ function validateCommands(body) {
   return null;
 }
 
-module.exports = { isPlainObject, validateCommands };
+const FRONTEND_ACTIONS = new Set([
+  '主题切换', '环境气象效果', '环境季节效果', '环境时间效果', 'executeCapability', 'executeOperation'
+]);
+
+const FRONTEND_THEME_NAMES = new Set([
+  '综合态势', '综合安防', '便捷通行', '资产管理', '设施管理', '能源管理', '办公会议', '网络体验'
+]);
+
+// 与前端 dispatcher 的 action 入口保持一致。业务 capability/operation 的深层生命周期仍由前端既有 Registry 校验。
+function validateFrontendCommands(body) {
+  for (let index = 0; index < body.length; index += 1) {
+    const command = body[index];
+    if (!FRONTEND_ACTIONS.has(command.action)) return `frontend command at index ${index} has unsupported action`;
+    if (!Object.prototype.hasOwnProperty.call(command, 'params')) return `frontend command at index ${index} params is required`;
+    const { params } = command;
+    if (command.action === '主题切换') {
+      if (typeof params['主题名称'] !== 'string' || !FRONTEND_THEME_NAMES.has(params['主题名称'])) {
+        return `frontend command at index ${index} has unsupported theme`;
+      }
+    }
+    if (command.action === 'executeCapability' &&
+      (typeof params.capability !== 'string' || typeof params.command !== 'string')) {
+      return `frontend command at index ${index} executeCapability requires string capability and command`;
+    }
+    if (command.action === 'executeOperation' &&
+      (typeof params.capability !== 'string' || typeof params.operation !== 'string' || typeof params.command !== 'string')) {
+      return `frontend command at index ${index} executeOperation requires string capability, operation and command`;
+    }
+  }
+  return null;
+}
+
+module.exports = { isPlainObject, validateCommands, validateFrontendCommands };
