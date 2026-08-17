@@ -1,12 +1,12 @@
 # 练秋湖 IOC AI 执行器（第一阶段）
 
-独立、轻量的 Node.js 执行器。它接收结构化 JSON 指令数组，经 HTTP POST 和基础结构校验后，将完整数组一次发布到 MQTT Broker。
+独立、轻量的 Node.js 执行器。正式 OSCA 请求为中文 HC 语义指令数组：执行器先严格校验并通过 HC Registry 展开成前端完整指令数组，再校验并一次发布到 MQTT Broker。
 
 ```text
-结构化 JSON → HTTP POST → Node.js 执行器 → 基础校验 → MQTT publish → MQTT Broker
+HC 中文语义 JSON → HTTP POST → HC 语义校验 / Registry Translator → 前端指令校验 → MQTT publish → MQTT Broker
 ```
 
-执行器不转换业务参数、不解释具体业务 `action`、不调用 IOC 页面或 UE API；多条指令不会拆分发送。当前 `action` / `params` 属于临时联调协议，并非正式业务协议。
+执行器不调用 IOC 页面或 UE API；多条展开后的前端指令仍作为一个数组一次发布，不会拆分发送。HC 业务语义只在执行器 Registry 中集中定义，前端继续复用既有 capability、operation 与 Scenario 实现。
 
 ## Git 与分支
 
@@ -74,20 +74,21 @@ MQTT 未连接：
 
 ### `POST /api/commands`
 
-请求应使用 `Content-Type: application/json`，请求体顶层必须为非空数组：
+正式 OSCA 请求应使用 `Content-Type: application/json`，请求体顶层必须为非空数组：
 
 ```json
 [
   {
-    "action": "指令名称",
-    "params": {}
+    "action": "启动园区实时运营情况",
+    "params": { "command": "start" }
   }
 ]
 ```
 
-- `action` 必须为非空字符串。
-- `params` 如存在，必须为普通对象；执行器不校验其中业务字段。
-- 执行器对原始完整数组执行 `JSON.stringify` 后一次 MQTT publish，不修改字段，也不拆分多条指令。
+- `action` 必须完整、精确命中 HC Registry；首批白名单为“启动/取消园区实时运营情况”和“启动/取消AI节能助手”。
+- `启动XXX` 只能搭配 `params.command: "start"`；`取消XXX` 只能搭配 `params.command: "cancel"`。缺失、大小写错误和其它值均拒绝。
+- 中文 HC 指令不会原样发布。执行器展开后会再次按前端 dispatcher 的 action/params 入口校验，再一次性 MQTT publish。
+- 为避免打断既有开发和自动化调用，现有完整前端 JSON 数组仍兼容；仅接受已知前端 action（主题切换、三类环境效果、`executeCapability`、`executeOperation`）。旧的无前缀 HC 业务名称不属于此前端协议，返回 400。
 
 结果状态码：成功为 200；请求校验失败为 400；MQTT 未连接为 503；MQTT publish 失败为 500。
 
