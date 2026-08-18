@@ -9,7 +9,9 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
     theme('综合态势'), capability('situation.parkRealTimeOperation', 'start')
   ]), cancel: Object.freeze([capability('situation.parkRealTimeOperation', 'cancel')]) }),
   Object.freeze({ name: '未佩戴安全帽告警', start: Object.freeze([
-    theme('综合安防'), capability('security.noHardHatAlert', 'start')
+    theme('综合安防'),
+    capability('security.noHardHatAlert', 'start'),
+    command('executeOperation', { capability: 'security.noHardHatAlert', operation: 'video', command: 'open' })
   ]), cancel: Object.freeze([capability('security.noHardHatAlert', 'cancel')]) }),
   // fireAlarmFullFlow：短信 radius=100 为前端冻结参数。
   Object.freeze({ name: '火灾预警', start: Object.freeze([
@@ -31,7 +33,10 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
     command('executeOperation', { capability: 'asset.assetInventory', operation: 'trajectory', command: 'toggle' })
   ]), cancel: Object.freeze([capability('asset.assetInventory', 'cancel')]) }),
   Object.freeze({ name: '资产非法外出告警', start: Object.freeze([
-    theme('资产管理'), capability('asset.illegalOutingAlert', 'start')
+    theme('资产管理'),
+    capability('asset.illegalOutingAlert', 'start'),
+    command('executeOperation', { capability: 'asset.illegalOutingAlert', operation: 'track', command: 'show' }),
+    command('executeOperation', { capability: 'asset.illegalOutingAlert', operation: 'video', command: 'show' })
   ]), cancel: Object.freeze([capability('asset.illegalOutingAlert', 'cancel')]) }),
   // equipmentInspectionFullFlow。
   Object.freeze({ name: '设备巡检告警', start: Object.freeze([
@@ -59,10 +64,14 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
     theme('能源管理'), capability('energy.chargingPileManagement', 'start')
   ]), cancel: Object.freeze([capability('energy.chargingPileManagement', 'cancel')]) }),
   Object.freeze({ name: 'VIP会议室', start: Object.freeze([
-    theme('办公会议'), capability('office.harmonyMeetingRoom', 'start')
+    theme('办公会议'),
+    capability('office.harmonyMeetingRoom', 'start'),
+    command('executeOperation', { capability: 'office.harmonyMeetingRoom', operation: 'meetingRoom', command: 'select', roomId: 'meeting-room1' })
   ]), cancel: Object.freeze([capability('office.harmonyMeetingRoom', 'cancel')]) }),
   Object.freeze({ name: 'Wi-Fi防偷拍检测', start: Object.freeze([
-    theme('办公会议'), capability('office.wifiAntiSpyAlert', 'start')
+    theme('办公会议'),
+    capability('office.wifiAntiSpyAlert', 'start'),
+    command('executeOperation', { capability: 'office.wifiAntiSpyAlert', operation: 'workOrder', command: 'dispatch' })
   ]), cancel: Object.freeze([capability('office.wifiAntiSpyAlert', 'cancel')]) }),
   Object.freeze({ name: '办公网络', start: Object.freeze([
     theme('网络体验'), capability('network.officeNetwork', 'start')
