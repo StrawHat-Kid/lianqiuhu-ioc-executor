@@ -2,7 +2,7 @@ const { getHcCommandDefinition, translateHcCommand } = require('./hc-command-reg
 
 function isHcSemanticRequest(commands) {
   return Array.isArray(commands) && commands.some((item) =>
-    typeof item?.action === 'string' && (item.action.startsWith('启动') || item.action.startsWith('取消'))
+    typeof item?.action === 'string' && getHcCommandDefinition(item.action) !== null
   );
 }
 
@@ -13,12 +13,11 @@ function validateHcSemanticCommands(commands) {
     // action 必须完整、精确命中 Registry；绝不依据前缀或 command 推导业务名称。
     const definition = getHcCommandDefinition(action);
     if (!definition) return `HC command at index ${index} action is not registered`;
-    if (!Object.prototype.hasOwnProperty.call(item, 'params') ||
-      !Object.prototype.hasOwnProperty.call(item.params, 'command')) {
-      return `HC command at index ${index} params.command is required`;
+    if (!Object.prototype.hasOwnProperty.call(item, 'params')) {
+      return `HC command at index ${index} params is required`;
     }
-    if (item.params.command !== definition.command) {
-      return `HC command at index ${index} action and params.command must match`;
+    if (Object.keys(item.params).length !== 0) {
+      return `HC command at index ${index} params must be empty`;
     }
   }
   return null;

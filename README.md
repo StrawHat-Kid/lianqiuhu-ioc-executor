@@ -80,13 +80,13 @@ MQTT 未连接：
 [
   {
     "action": "启动园区实时运营情况",
-    "params": { "command": "start" }
+    "params": {}
   }
 ]
 ```
 
-- `action` 必须完整、精确命中 HC Registry；首批白名单为“启动/取消园区实时运营情况”和“启动/取消AI节能助手”。
-- `启动XXX` 只能搭配 `params.command: "start"`；`取消XXX` 只能搭配 `params.command: "cancel"`。缺失、大小写错误和其它值均拒绝。
+- HC 业务 `action` 必须完整、精确命中 34 条 HC Registry 白名单；启动/取消语义由完整 action 名称在 Registry 中定义，不能根据前缀或 `params.command` 推导。
+- HC 业务 action 的 `params` 必须为 `{}`；`params.command` 或任何额外字段均拒绝。四条基础参数型指令（主题切换、环境气象效果、环境季节效果、环境时间效果）继续使用各自业务参数。
 - 中文 HC 指令不会原样发布。执行器展开后会再次按前端 dispatcher 的 action/params 入口校验，再一次性 MQTT publish。
 - 为避免打断既有开发和自动化调用，现有完整前端 JSON 数组仍兼容；仅接受已知前端 action（主题切换、三类环境效果、`executeCapability`、`executeOperation`）。旧的无前缀 HC 业务名称不属于此前端协议，返回 400。
 
