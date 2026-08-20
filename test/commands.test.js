@@ -101,7 +101,7 @@ test('published compatible frontend content is direct serialization of original 
 test('valid 启动园区实时运营情况 expands to its frozen frontend capability command', async () => {
   const publisher = createPublisher();
   const response = await request(publisher, 'POST', '/api/commands', [{
-    action: '启动园区实时运营情况', params: { command: 'start' }
+    action: '启动园区实时运营情况', params: {}
   }]);
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(publisher.calls[0]), [{
@@ -116,7 +116,7 @@ test('valid 启动园区实时运营情况 expands to its frozen frontend capabi
 test('valid 取消园区实时运营情况 expands to the real cancel lifecycle command', async () => {
   const publisher = createPublisher();
   const response = await request(publisher, 'POST', '/api/commands', [{
-    action: '取消园区实时运营情况', params: { command: 'cancel' }
+    action: '取消园区实时运营情况', params: {}
   }]);
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(publisher.calls[0]), [{
@@ -127,7 +127,7 @@ test('valid 取消园区实时运营情况 expands to the real cancel lifecycle 
 test('AI节能助手 start uses the frozen full Scenario and cancel uses its parent lifecycle command', async () => {
   const publisher = createPublisher();
   for (const [action, command] of [['启动AI节能助手', 'start'], ['取消AI节能助手', 'cancel']]) {
-    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
     assert.equal(response.status, 200);
     assert.deepEqual(JSON.parse(publisher.calls.at(-1)), command === 'start' ? [
       { action: '主题切换', params: { '主题名称': '能源管理' } },
@@ -171,7 +171,7 @@ test('all 17 HC businesses and 34 semantic actions expand to their frozen fronte
     for (const [prefix, command, expected] of [['启动', 'start', expectedStart], ['取消', 'cancel', expectedCancel]]) {
       const action = `${prefix}${name}`;
       const publisher = createPublisher();
-      const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
+      const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
       assert.equal(response.status, 200, action);
       const expanded = JSON.parse(publisher.calls[0]);
       assert.deepEqual(expanded, expected, action);
@@ -203,13 +203,13 @@ test('HC Registry is complete, paired, exact, and contains only valid frontend e
   }
 });
 
-test('all 34 semantic actions reject missing, mismatched, illegal, and uppercase commands', async () => {
-  for (const [action, definition] of Object.entries(HC_COMMAND_REGISTRY)) {
+test('all 34 semantic actions require exactly empty params objects', async () => {
+  for (const action of Object.keys(HC_COMMAND_REGISTRY)) {
     const invalidParams = [
-      {},
-      { command: definition.command === 'start' ? 'cancel' : 'start' },
+      { command: 'start' },
+      { command: 'cancel' },
       { command: 'stop' },
-      { command: definition.command.toUpperCase() }
+      { unrelated: true }
     ];
     for (const params of invalidParams) {
       const publisher = createPublisher();
@@ -220,18 +220,49 @@ test('all 34 semantic actions reject missing, mismatched, illegal, and uppercase
   }
 });
 
-test('HC action and command must match exactly', async () => {
+test('HC action names determine the semantic command and reject missing or invalid params', async () => {
   for (const body of [
-    [{ action: '启动园区实时运营情况', params: { command: 'cancel' } }],
-    [{ action: '取消园区实时运营情况', params: { command: 'start' } }],
-    [{ action: '启动园区实时运营情况', params: { command: 'START' } }],
-    [{ action: '启动园区实时运营情况', params: { command: 'stop' } }],
-    [{ action: '启动园区实时运营情况', params: {} }]
+    [{ action: '启动园区实时运营情况' }],
+    [{ action: '启动园区实时运营情况', params: null }],
+    [{ action: '启动园区实时运营情况', params: 'start' }],
+    [{ action: '启动园区实时运营情况', params: [] }]
   ]) {
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', body);
     assert.equal(response.status, 400);
     assert.equal(publisher.calls.length, 0);
+  }
+});
+
+test('four basic parameterized frontend controls retain their own parameter validation', async () => {
+  const validControls = [
+    { action: '主题切换', params: { '主题名称': '能源管理' } },
+    { action: '环境气象效果', params: { '天气': '晴' } },
+    { action: '环境季节效果', params: { '季节': '春季' } },
+    { action: '环境时间效果', params: { '时间': '18:30' } }
+  ];
+  for (const command of validControls) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [command]);
+    assert.equal(response.status, 200, command.action);
+    assert.equal(publisher.calls[0], JSON.stringify([command]));
+  }
+  for (const command of [
+    { action: '主题切换', params: {} },
+    { action: '环境气象效果', params: {} },
+    { action: '环境季节效果', params: {} },
+    { action: '环境时间效果', params: {} }
+  ]) {
+    assert.equal((await request(createPublisher(), 'POST', '/api/commands', [command])).status, 400, command.action);
+  }
+});
+
+test('direct frontend capability and operation commands still require command', async () => {
+  for (const command of [
+    { action: 'executeCapability', params: { capability: 'energy.aiAlgorithm' } },
+    { action: 'executeOperation', params: { capability: 'energy.aiAlgorithm', operation: 'video' } }
+  ]) {
+    assert.equal((await request(createPublisher(), 'POST', '/api/commands', [command])).status, 400, command.action);
   }
 });
 
