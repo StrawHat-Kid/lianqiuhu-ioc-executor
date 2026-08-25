@@ -5,6 +5,10 @@ const theme = (name) => command('主题切换', { '主题名称': name });
 // 来源：当前前端 park-ai Scenario Registry 与 Business Command Registry。
 // OSCA 只传本文件中的中文业务名称；capability、operation、固定参数均不得由 OSCA 覆盖。
 const HC_BUSINESS_REGISTRY = Object.freeze([
+  // parkOverview 仅作为产品定义的启动指令暴露；前端 cancel 生命周期不属于 HC 指令集。
+  Object.freeze({ name: '园区总览', start: Object.freeze([
+    theme('综合态势'), capability('situation.parkOverview', 'start')
+  ]), cancel: null }),
   Object.freeze({ name: '园区实时运营情况', start: Object.freeze([
     theme('综合态势'), capability('situation.parkRealTimeOperation', 'start')
   ]), cancel: Object.freeze([capability('situation.parkRealTimeOperation', 'cancel')]) }),
@@ -13,6 +17,10 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
     capability('security.noHardHatAlert', 'start'),
     command('executeOperation', { capability: 'security.noHardHatAlert', operation: 'video', command: 'open' })
   ]), cancel: Object.freeze([capability('security.noHardHatAlert', 'cancel')]) }),
+  // HC 第三方平台仅控制 iframe/Dialog，不属于 Narration，也不依赖 callback。
+  Object.freeze({ name: '安防第三方AI', start: Object.freeze([
+    theme('综合安防'), capability('security.thirdPartyAgent', 'start')
+  ]), cancel: Object.freeze([capability('security.thirdPartyAgent', 'cancel')]) }),
   // fireAlarmFullFlow：短信 radius=100 为前端冻结参数。
   Object.freeze({ name: '火灾预警', start: Object.freeze([
     theme('综合安防'),
@@ -63,6 +71,9 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
   Object.freeze({ name: '充电桩管理', start: Object.freeze([
     theme('能源管理'), capability('energy.chargingPileManagement', 'start')
   ]), cancel: Object.freeze([capability('energy.chargingPileManagement', 'cancel')]) }),
+  Object.freeze({ name: '能耗第三方AI', start: Object.freeze([
+    theme('能源管理'), capability('energy.thirdPartyAgent', 'start')
+  ]), cancel: Object.freeze([capability('energy.thirdPartyAgent', 'cancel')]) }),
   Object.freeze({ name: 'VIP会议室', start: Object.freeze([
     theme('办公会议'),
     capability('office.harmonyMeetingRoom', 'start'),
@@ -90,7 +101,9 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
 const createCommandRegistry = (businessRegistry) => {
   const registry = Object.create(null);
   for (const definition of businessRegistry) {
-    for (const [prefix, commandName, template] of [['启动', 'start', definition.start], ['取消', 'cancel', definition.cancel]]) {
+    const semanticCommands = [['启动', 'start', definition.start]];
+    if (definition.cancel !== null) semanticCommands.push(['取消', 'cancel', definition.cancel]);
+    for (const [prefix, commandName, template] of semanticCommands) {
       const action = `${prefix}${definition.name}`;
       if (registry[action]) throw new Error(`duplicate HC action: ${action}`);
       if (!Array.isArray(template) || template.length === 0) throw new Error(`empty HC template: ${action}`);

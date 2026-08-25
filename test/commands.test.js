@@ -101,7 +101,7 @@ test('published compatible frontend content is direct serialization of original 
 test('valid 启动园区实时运营情况 expands to its frozen frontend capability command', async () => {
   const publisher = createPublisher();
   const response = await request(publisher, 'POST', '/api/commands', [{
-    action: '启动园区实时运营情况', params: { command: 'start' }
+    action: '启动园区实时运营情况', params: {}
   }]);
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(publisher.calls[0]), [{
@@ -113,10 +113,36 @@ test('valid 启动园区实时运营情况 expands to its frozen frontend capabi
   assert.equal(publisher.calls[0].includes('启动园区实时运营情况'), false);
 });
 
+test('valid 启动园区总览 accepts empty params and expands to the frozen frontend capability command', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [{
+    action: '启动园区总览', params: {}
+  }]);
+  assert.equal(response.status, 200);
+  const expanded = JSON.parse(publisher.calls[0]);
+  assert.equal(expanded.length, 2);
+  assert.deepEqual(expanded, [{
+    action: '主题切换', params: { '主题名称': '综合态势' }
+  }, {
+    action: 'executeCapability', params: { capability: 'situation.parkOverview', command: 'start' }
+  }]);
+  assert.equal(validateFrontendCommands(expanded), null);
+});
+
+test('取消园区总览 is not a registered HC action', async () => {
+  assert.equal(HC_COMMAND_REGISTRY['取消园区总览'], undefined);
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [{
+    action: '取消园区总览', params: {}
+  }]);
+  assert.equal(response.status, 400);
+  assert.equal(publisher.calls.length, 0);
+});
+
 test('valid 取消园区实时运营情况 expands to the real cancel lifecycle command', async () => {
   const publisher = createPublisher();
   const response = await request(publisher, 'POST', '/api/commands', [{
-    action: '取消园区实时运营情况', params: { command: 'cancel' }
+    action: '取消园区实时运营情况', params: {}
   }]);
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(publisher.calls[0]), [{
@@ -127,7 +153,7 @@ test('valid 取消园区实时运营情况 expands to the real cancel lifecycle 
 test('AI节能助手 start uses the frozen full Scenario and cancel uses its parent lifecycle command', async () => {
   const publisher = createPublisher();
   for (const [action, command] of [['启动AI节能助手', 'start'], ['取消AI节能助手', 'cancel']]) {
-    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
     assert.equal(response.status, 200);
     assert.deepEqual(JSON.parse(publisher.calls.at(-1)), command === 'start' ? [
       { action: '主题切换', params: { '主题名称': '能源管理' } },
@@ -145,8 +171,10 @@ const frontendTheme = (name) => frontendCommand('主题切换', { '主题名称'
 
 // 该表独立于执行器 Registry：它锁定项目负责人给定的 17 个 OSCA 名称及前端冻结展开结果。
 const expectedBusinessDefinitions = [
+  ['园区总览', [frontendTheme('综合态势'), frontendCapability('situation.parkOverview', 'start')], null],
   ['园区实时运营情况', [frontendTheme('综合态势'), frontendCapability('situation.parkRealTimeOperation', 'start')], [frontendCapability('situation.parkRealTimeOperation', 'cancel')]],
   ['未佩戴安全帽告警', [frontendTheme('综合安防'), frontendCapability('security.noHardHatAlert', 'start'), frontendCommand('executeOperation', { capability: 'security.noHardHatAlert', operation: 'video', command: 'open' })], [frontendCapability('security.noHardHatAlert', 'cancel')]],
+  ['安防第三方AI', [frontendTheme('综合安防'), frontendCapability('security.thirdPartyAgent', 'start')], [frontendCapability('security.thirdPartyAgent', 'cancel')]],
   ['火灾预警', [frontendTheme('综合安防'), frontendCapability('security.fireAlarmAlert', 'start'), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'open' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'close' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyTeam', command: 'notify' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'smsNotification', command: 'notify', radius: 100 })], [frontendCapability('security.fireAlarmAlert', 'cancel')]],
   ['智慧考勤统计', [frontendTheme('便捷通行'), frontendCapability('access.smartAttendanceAlert', 'start')], [frontendCapability('access.smartAttendanceAlert', 'cancel')]],
   ['资产盘点', [frontendTheme('资产管理'), frontendCapability('asset.assetInventory', 'start'), frontendCommand('executeOperation', { capability: 'asset.assetInventory', operation: 'trajectory', command: 'toggle' })], [frontendCapability('asset.assetInventory', 'cancel')]],
@@ -157,6 +185,7 @@ const expectedBusinessDefinitions = [
   ['能流分析', [frontendTheme('能源管理'), frontendCapability('energy.energyFlow', 'start')], [frontendCapability('energy.energyFlow', 'cancel')]],
   ['光伏监测', [frontendTheme('能源管理'), frontendCapability('energy.photovoltaicMonitoring', 'start')], [frontendCapability('energy.photovoltaicMonitoring', 'cancel')]],
   ['充电桩管理', [frontendTheme('能源管理'), frontendCapability('energy.chargingPileManagement', 'start')], [frontendCapability('energy.chargingPileManagement', 'cancel')]],
+  ['能耗第三方AI', [frontendTheme('能源管理'), frontendCapability('energy.thirdPartyAgent', 'start')], [frontendCapability('energy.thirdPartyAgent', 'cancel')]],
   ['VIP会议室', [frontendTheme('办公会议'), frontendCapability('office.harmonyMeetingRoom', 'start'), frontendCommand('executeOperation', { capability: 'office.harmonyMeetingRoom', operation: 'meetingRoom', command: 'select', roomId: 'meeting-room1' })], [frontendCapability('office.harmonyMeetingRoom', 'cancel')]],
   ['Wi-Fi防偷拍检测', [frontendTheme('办公会议'), frontendCapability('office.wifiAntiSpyAlert', 'start'), frontendCommand('executeOperation', { capability: 'office.wifiAntiSpyAlert', operation: 'workOrder', command: 'dispatch' })], [frontendCapability('office.wifiAntiSpyAlert', 'cancel')]],
   ['办公网络', [frontendTheme('网络体验'), frontendCapability('network.officeNetwork', 'start')], [frontendCapability('network.officeNetwork', 'cancel')]],
@@ -164,14 +193,16 @@ const expectedBusinessDefinitions = [
   ['方案架构图', [frontendCapability('global.solutionArchitecture', 'start')], [frontendCapability('global.solutionArchitecture', 'cancel')]]
 ];
 
-test('all 17 HC businesses and 34 semantic actions expand to their frozen frontend arrays', async () => {
-  assert.equal(HC_BUSINESS_REGISTRY.length, 17);
-  assert.equal(Object.keys(HC_COMMAND_REGISTRY).length, 34);
+test('all 20 HC businesses and 39 semantic actions expand to their frozen frontend arrays', async () => {
+  assert.equal(HC_BUSINESS_REGISTRY.length, 20);
+  assert.equal(Object.keys(HC_COMMAND_REGISTRY).length, 39);
   for (const [name, expectedStart, expectedCancel] of expectedBusinessDefinitions) {
-    for (const [prefix, command, expected] of [['启动', 'start', expectedStart], ['取消', 'cancel', expectedCancel]]) {
+    const expectedActions = [['启动', 'start', expectedStart]];
+    if (expectedCancel !== null) expectedActions.push(['取消', 'cancel', expectedCancel]);
+    for (const [prefix, command, expected] of expectedActions) {
       const action = `${prefix}${name}`;
       const publisher = createPublisher();
-      const response = await request(publisher, 'POST', '/api/commands', [{ action, params: { command } }]);
+      const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
       assert.equal(response.status, 200, action);
       const expanded = JSON.parse(publisher.calls[0]);
       assert.deepEqual(expanded, expected, action);
@@ -181,17 +212,23 @@ test('all 17 HC businesses and 34 semantic actions expand to their frozen fronte
   }
 });
 
-test('HC Registry is complete, paired, exact, and contains only valid frontend expansions', () => {
+test('HC Registry is complete, exact, and contains only valid frontend expansions', () => {
   const actions = Object.keys(HC_COMMAND_REGISTRY);
-  assert.equal(new Set(actions).size, 34);
+  assert.equal(new Set(actions).size, 39);
   for (const business of HC_BUSINESS_REGISTRY) {
     const start = HC_COMMAND_REGISTRY[`启动${business.name}`];
-    const cancel = HC_COMMAND_REGISTRY[`取消${business.name}`];
     assert.equal(start.businessName, business.name);
     assert.equal(start.command, 'start');
-    assert.equal(cancel.businessName, business.name);
-    assert.equal(cancel.command, 'cancel');
-    for (const definition of [start, cancel]) {
+    const definitions = [start];
+    const cancel = HC_COMMAND_REGISTRY[`取消${business.name}`];
+    if (business.cancel === null) {
+      assert.equal(cancel, undefined);
+    } else {
+      assert.equal(cancel.businessName, business.name);
+      assert.equal(cancel.command, 'cancel');
+      definitions.push(cancel);
+    }
+    for (const definition of definitions) {
       assert.ok(definition.commands.length > 0);
       assert.equal(validateFrontendCommands(definition.commands), null);
       for (const item of definition.commands) {
@@ -203,13 +240,13 @@ test('HC Registry is complete, paired, exact, and contains only valid frontend e
   }
 });
 
-test('all 34 semantic actions reject missing, mismatched, illegal, and uppercase commands', async () => {
-  for (const [action, definition] of Object.entries(HC_COMMAND_REGISTRY)) {
+test('all 39 semantic actions require exactly empty params objects', async () => {
+  for (const action of Object.keys(HC_COMMAND_REGISTRY)) {
     const invalidParams = [
-      {},
-      { command: definition.command === 'start' ? 'cancel' : 'start' },
+      { command: 'start' },
+      { command: 'cancel' },
       { command: 'stop' },
-      { command: definition.command.toUpperCase() }
+      { unrelated: true }
     ];
     for (const params of invalidParams) {
       const publisher = createPublisher();
@@ -220,18 +257,77 @@ test('all 34 semantic actions reject missing, mismatched, illegal, and uppercase
   }
 });
 
-test('HC action and command must match exactly', async () => {
+test('HC action names determine the semantic command and reject missing or invalid params', async () => {
   for (const body of [
-    [{ action: '启动园区实时运营情况', params: { command: 'cancel' } }],
-    [{ action: '取消园区实时运营情况', params: { command: 'start' } }],
-    [{ action: '启动园区实时运营情况', params: { command: 'START' } }],
-    [{ action: '启动园区实时运营情况', params: { command: 'stop' } }],
-    [{ action: '启动园区实时运营情况', params: {} }]
+    [{ action: '启动园区实时运营情况' }],
+    [{ action: '启动园区实时运营情况', params: null }],
+    [{ action: '启动园区实时运营情况', params: 'start' }],
+    [{ action: '启动园区实时运营情况', params: [] }]
   ]) {
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', body);
     assert.equal(response.status, 400);
     assert.equal(publisher.calls.length, 0);
+  }
+});
+
+test('four basic parameterized frontend controls retain their own parameter validation', async () => {
+  const validControls = [
+    { action: '主题切换', params: { '主题名称': '能源管理' } },
+    { action: '环境气象效果', params: { '天气': '晴' } },
+    { action: '环境季节效果', params: { '季节': '春季' } },
+    { action: '环境时间效果', params: { '时间': '18:30' } }
+  ];
+  for (const command of validControls) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [command]);
+    assert.equal(response.status, 200, command.action);
+    assert.equal(publisher.calls[0], JSON.stringify([command]));
+  }
+  for (const command of [
+    { action: '主题切换', params: {} },
+    { action: '环境气象效果', params: {} },
+    { action: '环境季节效果', params: {} },
+    { action: '环境时间效果', params: {} }
+  ]) {
+    assert.equal((await request(createPublisher(), 'POST', '/api/commands', [command])).status, 400, command.action);
+  }
+});
+
+test('third-party AI semantics use only their own frozen theme and capability lifecycle commands', async () => {
+  const cases = [
+    ['启动安防第三方AI', [
+      { action: '主题切换', params: { '主题名称': '综合安防' } },
+      { action: 'executeCapability', params: { capability: 'security.thirdPartyAgent', command: 'start' } }
+    ]],
+    ['取消安防第三方AI', [
+      { action: 'executeCapability', params: { capability: 'security.thirdPartyAgent', command: 'cancel' } }
+    ]],
+    ['启动能耗第三方AI', [
+      { action: '主题切换', params: { '主题名称': '能源管理' } },
+      { action: 'executeCapability', params: { capability: 'energy.thirdPartyAgent', command: 'start' } }
+    ]],
+    ['取消能耗第三方AI', [
+      { action: 'executeCapability', params: { capability: 'energy.thirdPartyAgent', command: 'cancel' } }
+    ]]
+  ];
+  for (const [action, expected] of cases) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
+    assert.equal(response.status, 200, action);
+    const emitted = JSON.parse(publisher.calls[0]);
+    assert.deepEqual(emitted, expected, action);
+    assert.equal(validateFrontendCommands(emitted), null, action);
+    assert.doesNotMatch(JSON.stringify(emitted), /realtimeSituation|noHardHat|photovoltaicMonitoring|aiEnergyAssistant|energyFlow|aiAlgorithm|workOrder/);
+  }
+});
+
+test('direct frontend capability and operation commands still require command', async () => {
+  for (const command of [
+    { action: 'executeCapability', params: { capability: 'energy.aiAlgorithm' } },
+    { action: 'executeOperation', params: { capability: 'energy.aiAlgorithm', operation: 'video' } }
+  ]) {
+    assert.equal((await request(createPublisher(), 'POST', '/api/commands', [command])).status, 400, command.action);
   }
 });
 
@@ -323,8 +419,24 @@ test('readConfig accepts a valid first-phase configuration', () => {
   assert.deepEqual(readConfig(validEnv), {
     port: 8008, mqttUrl: validEnv.MQTT_URL, mqttUsername: validEnv.MQTT_USERNAME,
     mqttPassword: validEnv.MQTT_PASSWORD, mqttTopic: validEnv.MQTT_TOPIC,
-    mqttQos: 0, mqttRetain: false
+    mqttQos: 0, mqttRetain: false, ingressToken: undefined, ruisiCallbackTimeoutMs: 5000, narrationDurationScale: 1
   });
+});
+
+test('readConfig accepts INGRESS_TOKEN and optional RUISI callback timeout', () => {
+  const config = readConfig({ ...validEnv, INGRESS_TOKEN: 'ingress-token', RUISI_CALLBACK_TIMEOUT_MS: '8000' });
+  assert.equal(config.ingressToken, 'ingress-token');
+  assert.equal(config.ruisiCallbackTimeoutMs, 8000);
+});
+
+test('readConfig rejects an invalid RUISI callback timeout', () => {
+  assert.throws(() => readConfig({ ...validEnv, RUISI_CALLBACK_TIMEOUT_MS: '0' }), /RUISI_CALLBACK_TIMEOUT_MS/);
+});
+
+test('readConfig defaults invalid narration duration scale to 1 and accepts a positive scale', () => {
+  assert.equal(readConfig({ ...validEnv, HC_NARRATION_DURATION_SCALE: 'invalid' }).narrationDurationScale, 1);
+  assert.equal(readConfig({ ...validEnv, HC_NARRATION_DURATION_SCALE: '0' }).narrationDurationScale, 1);
+  assert.equal(readConfig({ ...validEnv, HC_NARRATION_DURATION_SCALE: '1.2' }).narrationDurationScale, 1.2);
 });
 
 test('readConfig rejects a non-mqtts URL', () => {

@@ -28,6 +28,12 @@ function readConfig(env = process.env) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('PORT must be a valid TCP port');
   }
+  const ruisiCallbackTimeoutMs = Number(env.RUISI_CALLBACK_TIMEOUT_MS || 5000);
+  if (!Number.isInteger(ruisiCallbackTimeoutMs) || ruisiCallbackTimeoutMs < 1) {
+    throw new Error('RUISI_CALLBACK_TIMEOUT_MS must be a positive integer');
+  }
+  const configuredScale = Number(env.HC_NARRATION_DURATION_SCALE || 1);
+  const narrationDurationScale = Number.isFinite(configuredScale) && configuredScale > 0 ? configuredScale : 1;
 
   return {
     port,
@@ -36,7 +42,10 @@ function readConfig(env = process.env) {
     mqttPassword: env.MQTT_PASSWORD,
     mqttTopic: env.MQTT_TOPIC,
     mqttQos: 0,
-    mqttRetain: false
+    mqttRetain: false,
+    ingressToken: env.INGRESS_TOKEN || undefined,
+    ruisiCallbackTimeoutMs,
+    narrationDurationScale
   };
 }
 

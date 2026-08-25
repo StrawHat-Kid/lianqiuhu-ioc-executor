@@ -13,14 +13,14 @@ function createMqttPublisher(config, logger, mqttLibrary = mqtt) {
 
   client.on('connect', () => {
     connected = true;
-    logger.info('mqtt connected', { mqttEndpoint: endpoint });
+    logger.info('[MQTT] 连接成功', { mqttEndpoint: endpoint });
   });
-  client.on('reconnect', () => logger.info('mqtt reconnecting', { mqttEndpoint: endpoint }));
+  client.on('reconnect', () => logger.info('[MQTT] 正在重连', { mqttEndpoint: endpoint }));
   client.on('close', () => {
     connected = false;
-    logger.warn('mqtt disconnected', { mqttEndpoint: endpoint });
+    logger.warn('[MQTT] 连接已断开', { mqttEndpoint: endpoint });
   });
-  client.on('error', (error) => logger.error('mqtt error', { mqttEndpoint: endpoint, error: error.message }));
+  client.on('error', (error) => logger.error('[MQTT] 连接异常', { mqttEndpoint: endpoint, error: error.message }));
 
   return {
     isConnected: () => connected && client.connected,
