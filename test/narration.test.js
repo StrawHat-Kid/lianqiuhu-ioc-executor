@@ -484,7 +484,7 @@ test('park realtime narration uses frozen English text, defaults language to Chi
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), realtimeEnTexts);
-  assert.deepEqual(durations, [12000, 6600, 5700, 6650, 6000, 3700]);
+  assert.deepEqual(durations, [12000, 9600, 5700, 9650, 9000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
 });
 
@@ -602,7 +602,7 @@ test('security narration preserves frozen English text, defaults language to Chi
   const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), securityEnTexts);
-  assert.deepEqual(durations, [12000, 6600, 5600, 7600, 6600, 3700]);
+  assert.deepEqual(durations, [12000, 6600, 8600, 7600, 6600, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, SECURITY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -726,7 +726,7 @@ test('energy narration preserves frozen English text, defaults language to Chine
   const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), energyEnTexts);
-  assert.deepEqual(durations, [12000, 6150, 5900, 5700, 6000, 3700]);
+  assert.deepEqual(durations, [12000, 9150, 5900, 8700, 9000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, ENERGY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -1108,9 +1108,9 @@ test('minimumIocHoldMs remains unscaled and postGapMs is added after the protect
 
 test('all production narration definitions freeze the calibrated durations, startup buffers, post gaps, prepare commands, and intros', () => {
   const definitions = [
-    [PARK_REALTIME_NARRATION, '综合态势', [14000, 5000, 7500, 9500, 17000], [11000, 7000, 11500, 10000, 17000], [4000, 4000, 4000, 4000, 0], [1500, 1000, 1500, 1000, 2000]],
-    [SECURITY_REALTIME_NARRATION, '综合安防', [12000, 5000, 5000, 10000, 16500], [11000, 6000, 6000, 11000, 17000], [4000, 4000, 6000, 4000, 0], [1500, 1000, 1000, 1500, 2000]],
-    [ENERGY_REALTIME_NARRATION, '能源管理', [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [0, 4000, 4000, 4000, 0], [3000, 1000, 1000, 1000, 2000]]
+    [PARK_REALTIME_NARRATION, '综合态势', [14000, 5000, 7500, 9500, 17000], [11000, 7000, 11500, 10000, 17000], [7000, 4000, 7000, 7000, 0], [1500, 1000, 1500, 1000, 2000]],
+    [SECURITY_REALTIME_NARRATION, '综合安防', [12000, 5000, 5000, 10000, 16500], [11000, 6000, 6000, 11000, 17000], [4000, 7000, 6000, 4000, 0], [1500, 1000, 1000, 1500, 2000]],
+    [ENERGY_REALTIME_NARRATION, '能源管理', [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [3000, 4000, 7000, 7000, 0], [3000, 1000, 1000, 1000, 2000]]
   ];
   for (const [definition, theme, zhDurations, enDurations, startupBuffers, postGaps] of definitions) {
     assert.equal(definition.introDelayMs, 12000);

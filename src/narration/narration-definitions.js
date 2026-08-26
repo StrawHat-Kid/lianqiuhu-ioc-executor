@@ -73,7 +73,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       14000,
       'On the operational dashboard: Parking occupancy shows Groups D-G are near saturation (~95%) while A-C are free (~40%).',
       11000,
-      { postGapMs: 1500, ttsStartupBufferMs: 4000 }
+      { postGapMs: 1500, ttsStartupBufferMs: 7000 }
     ),
     segment(
       2,
@@ -91,7 +91,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       7500,
       'Energy usage is topped by D1-Experimental Building (53 MWh) and G3-R&D Building (44.8 MWh).',
       11500,
-      { postGapMs: 1500, ttsStartupBufferMs: 4000 }
+      { postGapMs: 1500, ttsStartupBufferMs: 7000 }
     ),
     segment(
       4,
@@ -100,7 +100,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       9500,
       'System health is stable, led by fire safety at 99%, while AC is lower at 92% due to efficiency degradation.',
       10000,
-      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 7000 }
     ),
     segment(
       5,
@@ -144,7 +144,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
       5000,
       'Visual behavior is led by illegal vehicle parking (12 cases).',
       6000,
-      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 7000 }
     ),
     segment(
       3,
@@ -197,7 +197,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       27000,
       'Lianqiuhu campus consumes 2 million kWh (2 GWh) of electricity daily during peak periods, with monthly solar generation reaching 300,000 kWh (300 MWh). On the energy dashboard: Real-time supply features 35% green power (25% solar/812 kW, 10% storage/325 kW) and 65% municipal power (2,113 kW).',
       31500,
-      { postGapMs: 3000, ttsStartupBufferMs: 0 }
+      { postGapMs: 3000, ttsStartupBufferMs: 3000 }
     ),
     segment(
       2,
@@ -215,7 +215,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       7000,
       'Load monitoring peaks at Building F11 , with E10 at 34 W/m².',
       7000,
-      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 7000 }
     ),
     segment(
       4,
@@ -224,7 +224,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       8500,
       'Green index scores are high for safety (98) and solar ratio (95), but low for equipment efficiency (75).',
       10000,
-      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 7000 }
     ),
     segment(
       5,
