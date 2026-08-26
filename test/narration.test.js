@@ -480,7 +480,7 @@ test('park realtime narration uses frozen English text, defaults language to Chi
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), realtimeEnTexts);
-  assert.deepEqual(durations, [4000, 2600, 1700, 2650, 2000, 3700]);
+  assert.deepEqual(durations, [4000, 6600, 5700, 6650, 6000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
 });
 
@@ -598,7 +598,7 @@ test('security narration preserves frozen English text, defaults language to Chi
   const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), securityEnTexts);
-  assert.deepEqual(durations, [4000, 2600, 1600, 1600, 2600, 3700]);
+  assert.deepEqual(durations, [4000, 6600, 5600, 7600, 6600, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, SECURITY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -722,7 +722,7 @@ test('energy narration preserves frozen English text, defaults language to Chine
   const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), energyEnTexts);
-  assert.deepEqual(durations, [4000, 6150, 1900, 1700, 2000, 3700]);
+  assert.deepEqual(durations, [4000, 6150, 5900, 5700, 6000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, ENERGY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -952,6 +952,91 @@ test('postGapMs is independent of duration scale and is applied before the next 
   await started.session.runPromise;
 });
 
+test('ttsStartupBufferMs defaults to zero for definitions that do not configure it', () => {
+  const content = { durationMs: 1000 };
+  assert.equal(getEffectiveSegmentDurationMs(content, {}, 1), 1000);
+  assert.equal(getEffectiveSegmentDurationMs(content, { postGapMs: 500 }, 0.1), 600);
+});
+
+test('ttsStartupBufferMs is added to the segment wait budget and duration scale only affects speech duration', () => {
+  const content = { durationMs: 10000 };
+  const segment = { ttsStartupBufferMs: 4000, postGapMs: 1000 };
+  assert.equal(getEffectiveSegmentDurationMs(content, segment, 1), 15000);
+  assert.equal(getEffectiveSegmentDurationMs(content, segment, 0.1), 6000);
+});
+
+test('ttsStartupBufferMs does not delay the current segment callback', async () => {
+  const executor = commandExecutor();
+  const callback = callbackClient();
+  const clock = manualWait({ autoResolveIntroDelay: false });
+  const definition = testNarrationDefinition({
+    segments: [
+      {
+        index: 1, commands: [{ action: 'testStepOne', params: {} }], ttsStartupBufferMs: 4000, postGapMs: 1000,
+        content: { 'zh-CN': { text: 'one', durationMs: 10000 } }
+      },
+      {
+        index: 2, commands: [{ action: 'testStepTwo', params: {} }],
+        content: { 'zh-CN': { text: 'two', durationMs: 1000 } }
+      }
+    ]
+  });
+  const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
+  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+
+  await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
+  assert.deepEqual(executor.calls.map((call) => call.meta.source), [
+    'narration:testNarration:start', 'narration:testNarration:segment-1'
+  ]);
+  assert.equal(clock.calls[0].ms, 15000);
+  assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-2')), false);
+
+  clock.calls[0].resolve();
+  await eventually(() => clock.calls.length === 2 && callback.calls.length === 2);
+  clock.calls[1].resolve();
+  await started.session.runPromise;
+});
+
+test('preemption during a ttsStartupBufferMs wait prevents later steps, callbacks, and finish', async () => {
+  const executor = commandExecutor();
+  const callback = callbackClient();
+  const clock = manualWait({ autoResolveIntroDelay: false });
+  const definitionA = testNarrationDefinition({
+    scenario: 'bufferA',
+    segments: [
+      { index: 1, commands: [], ttsStartupBufferMs: 4000, content: { 'zh-CN': { text: 'one', durationMs: 1000 } } },
+      { index: 2, commands: [{ action: 'bufferAStepTwo', params: {} }], content: { 'zh-CN': { text: 'two', durationMs: 1000 } } }
+    ]
+  });
+  const definitionB = testNarrationDefinition({ scenario: 'bufferB' });
+  const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
+  const first = manager.startNarration({ definition: definitionA, context: context(undefined, 'A'), language: 'zh-CN' });
+
+  await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
+  assert.equal(clock.calls[0].ms, 5000);
+  const second = manager.startNarration({ definition: definitionB, context: context(undefined, 'B'), language: 'zh-CN' });
+  await eventually(() => first.session.state === 'completed' && clock.calls.length === 2 && callback.calls.length === 2);
+
+  assert.equal(executor.calls.some((call) => call.meta.source === 'narration:bufferA:segment-2'), false);
+  assert.equal(executor.calls.some((call) => call.meta.source === 'narration:bufferA:complete'), false);
+  assert.equal(callback.calls.some((call) => call.options.scenario === 'bufferA' && call.options.segmentIndex === 2), false);
+
+  clock.calls[1].resolve();
+  await second.session.runPromise;
+  assert.equal(manager.getActiveSession(), null);
+});
+
+test('minimumIocHoldMs compares the startup-plus-speech budget before adding postGapMs', () => {
+  assert.equal(
+    getEffectiveSegmentDurationMs({ durationMs: 20000 }, { ttsStartupBufferMs: 4000, minimumIocHoldMs: 30000, postGapMs: 0 }, 1),
+    30000
+  );
+  assert.equal(
+    getEffectiveSegmentDurationMs({ durationMs: 30000 }, { ttsStartupBufferMs: 4000, minimumIocHoldMs: 30000, postGapMs: 0 }, 1),
+    34000
+  );
+});
+
 test('minimumIocHoldMs remains unscaled and postGapMs is added after the protected hold', async () => {
   for (const postGapMs of [0, 500]) {
     const executor = commandExecutor();
@@ -977,18 +1062,19 @@ test('minimumIocHoldMs remains unscaled and postGapMs is added after the protect
   }
 });
 
-test('all production narration definitions freeze the calibrated durations, post gaps, prepare commands, and intros', () => {
+test('all production narration definitions freeze the calibrated durations, startup buffers, post gaps, prepare commands, and intros', () => {
   const definitions = [
-    [PARK_REALTIME_NARRATION, '综合态势', [14000, 5000, 7500, 9500, 17000], [11000, 7000, 11500, 10000, 17000], [1500, 1000, 1500, 1000, 2000]],
-    [SECURITY_REALTIME_NARRATION, '综合安防', [12000, 5000, 5000, 10000, 16500], [11000, 6000, 6000, 11000, 17000], [1500, 1000, 1000, 1500, 2000]],
-    [ENERGY_REALTIME_NARRATION, '能源管理', [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [3000, 1000, 1000, 1000, 2000]]
+    [PARK_REALTIME_NARRATION, '综合态势', [14000, 5000, 7500, 9500, 17000], [11000, 7000, 11500, 10000, 17000], [4000, 4000, 4000, 4000, 0], [1500, 1000, 1500, 1000, 2000]],
+    [SECURITY_REALTIME_NARRATION, '综合安防', [12000, 5000, 5000, 10000, 16500], [11000, 6000, 6000, 11000, 17000], [4000, 4000, 6000, 4000, 0], [1500, 1000, 1000, 1500, 2000]],
+    [ENERGY_REALTIME_NARRATION, '能源管理', [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [0, 4000, 4000, 4000, 0], [3000, 1000, 1000, 1000, 2000]]
   ];
-  for (const [definition, theme, zhDurations, enDurations, postGaps] of definitions) {
+  for (const [definition, theme, zhDurations, enDurations, startupBuffers, postGaps] of definitions) {
     assert.equal(definition.introDelayMs, 4000);
     assert.deepEqual(definition.prepareCommands, [{ action: '主题切换', params: { '主题名称': theme } }]);
     assert.equal(definition.startCommands.some((item) => item.action === '主题切换'), false);
     assert.deepEqual(definition.segments.map((item) => item.content['zh-CN'].durationMs), zhDurations);
     assert.deepEqual(definition.segments.map((item) => item.content['en-US'].durationMs), enDurations);
+    assert.deepEqual(definition.segments.map((item) => item.ttsStartupBufferMs), startupBuffers);
     assert.deepEqual(definition.segments.map((item) => item.postGapMs), postGaps);
     assert.deepEqual(
       definition.segments.flatMap((item) => [item.postGapMs, item.postGapMs]),
@@ -998,6 +1084,7 @@ test('all production narration definitions freeze the calibrated durations, post
   assert.equal(PARK_BASE_OVERVIEW.introDelayMs, 4000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['zh-CN'].durationMs, 20000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['en-US'].durationMs, 22000);
+  assert.equal(PARK_BASE_OVERVIEW.segments[0].ttsStartupBufferMs || 0, 0);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].postGapMs || 0, 0);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].minimumIocHoldMs, 30000);
 });

@@ -14,11 +14,12 @@ const securityPresentationStep = (index) => command('executeOperation', {
 const energyPresentationStep = (index) => command('executeOperation', {
   capability: 'energy.realtimeSituation', operation: 'presentation', command: 'select', index
 });
-const segment = (index, commands, zhText, zhDurationMs, enText, enDurationMs, { minimumIocHoldMs, postGapMs } = {}) => Object.freeze({
+const segment = (index, commands, zhText, zhDurationMs, enText, enDurationMs, { minimumIocHoldMs, postGapMs, ttsStartupBufferMs } = {}) => Object.freeze({
   index,
   commands: Object.freeze(commands),
   ...(minimumIocHoldMs === undefined ? {} : { minimumIocHoldMs }),
   ...(postGapMs === undefined ? {} : { postGapMs }),
+  ...(ttsStartupBufferMs === undefined ? {} : { ttsStartupBufferMs }),
   content: Object.freeze({
     'zh-CN': Object.freeze({ text: zhText, durationMs: zhDurationMs }),
     'en-US': Object.freeze({ text: enText, durationMs: enDurationMs })
@@ -72,7 +73,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       14000,
       'On the operational dashboard: Parking occupancy shows Groups D-G are near saturation (~95%) while A-C are free (~40%).',
       11000,
-      { postGapMs: 1500 }
+      { postGapMs: 1500, ttsStartupBufferMs: 4000 }
     ),
     segment(
       2,
@@ -81,7 +82,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       5000,
       'Repairs are concentrated in Group D (10 cases) and G (9 cases).',
       7000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
     ),
     segment(
       3,
@@ -90,7 +91,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       7500,
       'Energy usage is topped by D1-Experimental Building (53 MWh) and G3-R&D Building (44.8 MWh).',
       11500,
-      { postGapMs: 1500 }
+      { postGapMs: 1500, ttsStartupBufferMs: 4000 }
     ),
     segment(
       4,
@@ -99,7 +100,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       9500,
       'System health is stable, led by fire safety at 99%, while AC is lower at 92% due to efficiency degradation.',
       10000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
     ),
     segment(
       5,
@@ -108,7 +109,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
       17000,
       'AI Operational Conclusion: High-density crowd flows in Groups D-G have driven up parking and energy use. We recommend implementing tidal guidance to divert traffic to Groups A-C, and shifting non-real-time high-power tasks to nighttime to balance grid load.',
       17000,
-      { postGapMs: 2000 }
+      { postGapMs: 2000, ttsStartupBufferMs: 0 }
     )
   ]),
   completeCommands: Object.freeze([capability('situation.parkRealtimeNarration', 'finish')]),
@@ -134,7 +135,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
       12000,
       'On the real-time security dashboard: Alarm disposition features a 76% AI automatic processing rate and 92% noise reduction to filter interference.',
       11000,
-      { postGapMs: 1500 }
+      { postGapMs: 1500, ttsStartupBufferMs: 4000 }
     ),
     segment(
       2,
@@ -143,7 +144,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
       5000,
       'Visual behavior is led by illegal vehicle parking (12 cases).',
       6000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
     ),
     segment(
       3,
@@ -152,7 +153,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
       5000,
       'Perimeter pressure peaks in Area C with 23 alarms.',
       6000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 6000 }
     ),
     segment(
       4,
@@ -161,7 +162,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
       10000,
       'Patrol completion shows man-machine synergy, with Robot Patrol Team B (76%) successfully covering Human Team B\'s low rate (22%).',
       11000,
-      { postGapMs: 1500 }
+      { postGapMs: 1500, ttsStartupBufferMs: 4000 }
     ),
     segment(
       5,
@@ -170,7 +171,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
       16500,
       'AI Decision: Security is running in a sensitive closed loop. An unhelmeted operator violation has been detected in Building B11-2F, No. 1 10KV power distribution room; please physical verify immediately.',
       17000,
-      { postGapMs: 2000 }
+      { postGapMs: 2000, ttsStartupBufferMs: 0 }
     )
   ]),
   completeCommands: Object.freeze([capability('security.realtimeSituation', 'finish')]),
@@ -196,7 +197,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       27000,
       'Lianqiuhu campus consumes 2 million kWh (2 GWh) of electricity daily during peak periods, with monthly solar generation reaching 300,000 kWh (300 MWh). On the energy dashboard: Real-time supply features 35% green power (25% solar/812 kW, 10% storage/325 kW) and 65% municipal power (2,113 kW).',
       31500,
-      { postGapMs: 3000 }
+      { postGapMs: 3000, ttsStartupBufferMs: 0 }
     ),
     segment(
       2,
@@ -205,7 +206,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       7000,
       'Load trend shows 3,050 kW at 10:00, slightly above yesterday\'s 2,950 kW.',
       9000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
     ),
     segment(
       3,
@@ -214,7 +215,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       7000,
       'Load monitoring peaks at Building F11 , with E10 at 34 W/m².',
       7000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
     ),
     segment(
       4,
@@ -223,7 +224,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       8500,
       'Green index scores are high for safety (98) and solar ratio (95), but low for equipment efficiency (75).',
       10000,
-      { postGapMs: 1000 }
+      { postGapMs: 1000, ttsStartupBufferMs: 4000 }
     ),
     segment(
       5,
@@ -232,7 +233,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
       16000,
       'AI Decision: Solar-storage synergy reduced carbon emissions by 8% compared to yesterday. Building B\'s HVAC inefficiency and chiller #2\'s efficiency degradation are the main issues; maintenance orders have been automatically dispatched.',
       17000,
-      { postGapMs: 2000 }
+      { postGapMs: 2000, ttsStartupBufferMs: 0 }
     )
   ]),
   completeCommands: Object.freeze([capability('energy.realtimeSituation', 'finish')]),
