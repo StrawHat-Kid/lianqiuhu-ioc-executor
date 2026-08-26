@@ -34,17 +34,23 @@ function getEffectiveSegmentDurationMs(content, segment, durationScale) {
 
 function getSegmentDurationDetails(content, segment, durationScale) {
   const scaledSpeechDurationMs = Math.max(1, Math.round(content.durationMs * durationScale));
+  const ttsStartupBufferMs = Number.isFinite(segment.ttsStartupBufferMs) && segment.ttsStartupBufferMs >= 0
+    ? Math.round(segment.ttsStartupBufferMs)
+    : 0;
   const minimumIocHoldMs = Number.isFinite(segment.minimumIocHoldMs) && segment.minimumIocHoldMs > 0
     ? Math.round(segment.minimumIocHoldMs)
     : 0;
   const postGapMs = Number.isFinite(segment.postGapMs) && segment.postGapMs >= 0
     ? Math.round(segment.postGapMs)
     : 0;
-  const iocHoldMs = Math.max(scaledSpeechDurationMs, minimumIocHoldMs);
+  const speechBudgetMs = ttsStartupBufferMs + scaledSpeechDurationMs;
+  const iocHoldMs = Math.max(speechBudgetMs, minimumIocHoldMs);
   return {
     speechDurationMs: content.durationMs,
     durationScale,
     scaledSpeechDurationMs,
+    ttsStartupBufferMs,
+    speechBudgetMs,
     minimumIocHoldMs,
     postGapMs,
     iocHoldMs,
@@ -136,7 +142,10 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
           segment: `${segment.index}/${session.definition.segments.length}`,
           durationMs: durationDetails.speechDurationMs,
           scaledDurationMs: durationDetails.scaledSpeechDurationMs,
-          postGapMs: durationDetails.postGapMs
+          ttsStartupBufferMs: durationDetails.ttsStartupBufferMs,
+          postGapMs: durationDetails.postGapMs,
+          minimumIocHoldMs: durationDetails.minimumIocHoldMs,
+          effectiveHoldMs: durationDetails.effectiveHoldMs
         }));
         if (segment.commands.length > 0) {
           logger.info('[讲解] 准备切换IOC展示步骤', sessionDetails(session, {
@@ -179,7 +188,9 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
           segment: `${segment.index}/${session.definition.segments.length}`,
           durationMs: durationDetails.speechDurationMs,
           scaledDurationMs: durationDetails.scaledSpeechDurationMs,
+          ttsStartupBufferMs: durationDetails.ttsStartupBufferMs,
           postGapMs: durationDetails.postGapMs,
+          minimumIocHoldMs: durationDetails.minimumIocHoldMs,
           effectiveHoldMs: durationMs
         }));
         await wait(durationMs, session.abortController.signal);
