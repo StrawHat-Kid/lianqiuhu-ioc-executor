@@ -85,10 +85,14 @@ function callbackClient(results = []) {
 }
 function manualWait({ autoResolveIntroDelay = true } = {}) {
   const calls = [];
+  const introDelaySignals = new WeakSet();
   return {
     calls,
     wait: (ms, signal) => {
-      if (autoResolveIntroDelay && ms === 4000) return Promise.resolve();
+      if (autoResolveIntroDelay && ms === 12000 && signal && !introDelaySignals.has(signal)) {
+        introDelaySignals.add(signal);
+        return Promise.resolve();
+      }
       return new Promise((resolve, reject) => {
       const item = { ms, resolve, reject };
       calls.push(item);
@@ -480,7 +484,7 @@ test('park realtime narration uses frozen English text, defaults language to Chi
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), realtimeEnTexts);
-  assert.deepEqual(durations, [4000, 6600, 5700, 6650, 6000, 3700]);
+  assert.deepEqual(durations, [12000, 6600, 5700, 6650, 6000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
 });
 
@@ -598,7 +602,7 @@ test('security narration preserves frozen English text, defaults language to Chi
   const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), securityEnTexts);
-  assert.deepEqual(durations, [4000, 6600, 5600, 7600, 6600, 3700]);
+  assert.deepEqual(durations, [12000, 6600, 5600, 7600, 6600, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, SECURITY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -722,7 +726,7 @@ test('energy narration preserves frozen English text, defaults language to Chine
   const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), energyEnTexts);
-  assert.deepEqual(durations, [4000, 6150, 5900, 5700, 6000, 3700]);
+  assert.deepEqual(durations, [12000, 6150, 5900, 5700, 6000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, ENERGY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -863,13 +867,13 @@ test('prepareCommands run before introDelay, which blocks startCommands and the 
   const callback = callbackClient();
   const clock = manualWait({ autoResolveIntroDelay: false });
   const definition = testNarrationDefinition({
-    prepareCommands: [{ action: 'testPrepare', params: {} }], introDelayMs: 4000
+    prepareCommands: [{ action: 'testPrepare', params: {} }], introDelayMs: 12000
   });
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
   const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
 
   await eventually(() => clock.calls.length === 1);
-  assert.equal(clock.calls[0].ms, 4000);
+  assert.equal(clock.calls[0].ms, 12000);
   assert.deepEqual(executor.calls.map((call) => call.meta.source), ['narration:testNarration:prepare']);
   assert.equal(callback.calls.length, 0);
 
@@ -879,6 +883,46 @@ test('prepareCommands run before introDelay, which blocks startCommands and the 
     'narration:testNarration:prepare', 'narration:testNarration:start'
   ]);
   clock.calls[1].resolve();
+  await started.session.runPromise;
+});
+
+test('a 12000ms introDelay blocks start and callback through 11999ms, and duration scale does not change it', async () => {
+  const executor = commandExecutor();
+  const callback = callbackClient();
+  let elapsedMs = 0;
+  const pending = [];
+  const clock = {
+    wait: (ms) => new Promise((resolve) => pending.push({ ms, dueAt: elapsedMs + ms, resolve })),
+    advance: (ms) => {
+      elapsedMs += ms;
+      for (const item of pending.filter((item) => !item.done && item.dueAt <= elapsedMs)) {
+        item.done = true;
+        item.resolve();
+      }
+    }
+  };
+  const definition = testNarrationDefinition({
+    prepareCommands: [{ action: 'testPrepare', params: {} }], introDelayMs: 12000
+  });
+  const manager = createNarrationSessionManager({
+    commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: 0.1, wait: clock.wait
+  });
+  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+
+  await eventually(() => pending.length === 1);
+  assert.equal(pending[0].ms, 12000);
+  assert.deepEqual(executor.calls.map((call) => call.meta.source), ['narration:testNarration:prepare']);
+  assert.equal(callback.calls.length, 0);
+
+  clock.advance(11999);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(executor.calls.some((call) => call.meta.source.endsWith(':start')), false);
+  assert.equal(callback.calls.length, 0);
+
+  clock.advance(1);
+  await eventually(() => callback.calls.length === 1 && pending.length === 2);
+  assert.equal(pending[1].ms, 100);
+  clock.advance(100);
   await started.session.runPromise;
 });
 
@@ -903,10 +947,10 @@ test('preemption during introDelay aborts the old session before start, callback
   const callback = callbackClient();
   const clock = manualWait({ autoResolveIntroDelay: false });
   const definitionA = testNarrationDefinition({
-    scenario: 'introA', prepareCommands: [{ action: 'prepareA', params: {} }], introDelayMs: 4000
+    scenario: 'introA', prepareCommands: [{ action: 'prepareA', params: {} }], introDelayMs: 12000
   });
   const definitionB = testNarrationDefinition({
-    scenario: 'introB', prepareCommands: [{ action: 'prepareB', params: {} }], introDelayMs: 4000
+    scenario: 'introB', prepareCommands: [{ action: 'prepareB', params: {} }], introDelayMs: 12000
   });
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
   const first = manager.startNarration({ definition: definitionA, context: context(undefined, 'A'), language: 'zh-CN' });
@@ -1069,7 +1113,7 @@ test('all production narration definitions freeze the calibrated durations, star
     [ENERGY_REALTIME_NARRATION, '能源管理', [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [0, 4000, 4000, 4000, 0], [3000, 1000, 1000, 1000, 2000]]
   ];
   for (const [definition, theme, zhDurations, enDurations, startupBuffers, postGaps] of definitions) {
-    assert.equal(definition.introDelayMs, 4000);
+    assert.equal(definition.introDelayMs, 12000);
     assert.deepEqual(definition.prepareCommands, [{ action: '主题切换', params: { '主题名称': theme } }]);
     assert.equal(definition.startCommands.some((item) => item.action === '主题切换'), false);
     assert.deepEqual(definition.segments.map((item) => item.content['zh-CN'].durationMs), zhDurations);
@@ -1081,7 +1125,7 @@ test('all production narration definitions freeze the calibrated durations, star
       postGaps.flatMap((postGapMs) => [postGapMs, postGapMs])
     );
   }
-  assert.equal(PARK_BASE_OVERVIEW.introDelayMs, 4000);
+  assert.equal(PARK_BASE_OVERVIEW.introDelayMs, 12000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['zh-CN'].durationMs, 20000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['en-US'].durationMs, 22000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].ttsStartupBufferMs || 0, 0);

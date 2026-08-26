@@ -32,7 +32,7 @@ const PARK_BASE_OVERVIEW = Object.freeze({
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合态势' })
   ]),
-  introDelayMs: 4000,
+  introDelayMs: 12000,
   startCommands: Object.freeze([
     capability('situation.parkOverviewNarration', 'start')
   ]),
@@ -60,7 +60,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合态势' })
   ]),
-  introDelayMs: 4000,
+  introDelayMs: 12000,
   startCommands: Object.freeze([
     capability('situation.parkRealtimeNarration', 'start')
   ]),
@@ -122,7 +122,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合安防' })
   ]),
-  introDelayMs: 4000,
+  introDelayMs: 12000,
   startCommands: Object.freeze([
     capability('security.realtimeSituation', 'start')
   ]),
@@ -184,7 +184,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '能源管理' })
   ]),
-  introDelayMs: 4000,
+  introDelayMs: 12000,
   startCommands: Object.freeze([
     capability('energy.realtimeSituation', 'start')
   ]),
