@@ -57,6 +57,8 @@ const PARK_BASE_OVERVIEW = Object.freeze({
 const PARK_REALTIME_NARRATION = Object.freeze({
   scenario: 'parkRealtimeNarration',
   action: PARK_REALTIME_NARRATION_ACTION,
+  // Narration 2.0: 保留 5 个正式 step 标定，只在运行时按两次回程编排。
+  returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合态势' })
   ]),
@@ -119,6 +121,8 @@ const PARK_REALTIME_NARRATION = Object.freeze({
 const SECURITY_REALTIME_NARRATION = Object.freeze({
   scenario: 'securityRealtimeNarration',
   action: SECURITY_REALTIME_NARRATION_ACTION,
+  // Narration 2.0: 第 1 至 4 段合并回程，第 5 段保持独立回程。
+  returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合安防' })
   ]),
@@ -181,6 +185,8 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
 const ENERGY_REALTIME_NARRATION = Object.freeze({
   scenario: 'energyRealtimeNarration',
   action: ENERGY_REALTIME_NARRATION_ACTION,
+  // Narration 2.0: 第 1 至 4 段合并回程，第 5 段保持独立回程。
+  returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '能源管理' })
   ]),

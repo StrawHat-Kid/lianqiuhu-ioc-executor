@@ -58,6 +58,51 @@ function getSegmentDurationDetails(content, segment, durationScale) {
   };
 }
 
+function getReturnGroups(definition) {
+  const groups = definition.returnGroups;
+  if (!Array.isArray(groups) || groups.length === 0) return definition.segments.map((segment) => [segment]);
+  const byIndex = new Map(definition.segments.map((segment) => [segment.index, segment]));
+  const usedIndexes = new Set();
+  const resolved = groups.map((indexes) => {
+    if (!Array.isArray(indexes) || indexes.length === 0) throw new Error('narration return group must contain segments');
+    return indexes.map((index) => {
+      if (!Number.isInteger(index) || usedIndexes.has(index) || !byIndex.has(index)) {
+        throw new Error('narration return groups must reference each segment once');
+      }
+      usedIndexes.add(index);
+      return byIndex.get(index);
+    });
+  });
+  if (usedIndexes.size !== definition.segments.length) {
+    throw new Error('narration return groups must cover every segment');
+  }
+  return resolved;
+}
+
+function getReturnGroupDurationDetails(segments, language, durationScale) {
+  const details = segments.map((segment) => getSegmentDurationDetails(segment.content[language], segment, durationScale));
+  const first = details[0];
+  const last = details.at(-1);
+  const scaledSpeechDurationMs = details.reduce((total, item) => total + item.scaledSpeechDurationMs, 0);
+  const minimumIocHoldMs = Math.max(...details.map((item) => item.minimumIocHoldMs));
+  const speechBudgetMs = first.ttsStartupBufferMs + scaledSpeechDurationMs;
+  const iocHoldMs = Math.max(speechBudgetMs, minimumIocHoldMs);
+  return {
+    speechDurationMs: details.reduce((total, item) => total + item.speechDurationMs, 0),
+    durationScale,
+    scaledSpeechDurationMs,
+    // 一个合并回程只会真正启动一次 TTS，因此只使用第一 step 的 buffer。
+    ttsStartupBufferMs: first.ttsStartupBufferMs,
+    speechBudgetMs,
+    minimumIocHoldMs,
+    // 仅保留组尾 step 与下一回程之间原本就存在的边界 gap。
+    postGapMs: last.postGapMs,
+    iocHoldMs,
+    effectiveHoldMs: iocHoldMs + last.postGapMs,
+    segmentDetails: details
+  };
+}
+
 function createNarrationSessionManager({ commandExecutor, callbackClient, logger, durationScale = 1, wait = sleep } = {}) {
   if (!commandExecutor || typeof commandExecutor.publishFrontendCommands !== 'function') {
     throw new Error('narration command executor is required');
@@ -134,12 +179,17 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
       logger.info('[讲解] IOC起始指令发布成功', sessionDetails(session));
       if (session.abortController.signal.aborted) return;
 
-      for (const segment of session.definition.segments) {
+      const returnGroups = getReturnGroups(session.definition);
+      for (let groupPosition = 0; groupPosition < returnGroups.length; groupPosition += 1) {
         if (session.abortController.signal.aborted) return;
-        const content = segment.content[session.language];
-        const durationDetails = getSegmentDurationDetails(content, segment, durationScale);
-        logger.info('[讲解] Narration segment开始', sessionDetails(session, {
-          segment: `${segment.index}/${session.definition.segments.length}`,
+        const segments = returnGroups[groupPosition];
+        const firstSegment = segments[0];
+        const lastSegment = segments.at(-1);
+        const content = segments.map((segment) => segment.content[session.language]);
+        const durationDetails = getReturnGroupDurationDetails(segments, session.language, durationScale);
+        logger.info('[讲解] Narration 回程开始', sessionDetails(session, {
+          returnGroup: `${groupPosition + 1}/${returnGroups.length}`,
+          segments: segments.map((segment) => segment.index),
           durationMs: durationDetails.speechDurationMs,
           scaledDurationMs: durationDetails.scaledSpeechDurationMs,
           ttsStartupBufferMs: durationDetails.ttsStartupBufferMs,
@@ -147,45 +197,51 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
           minimumIocHoldMs: durationDetails.minimumIocHoldMs,
           effectiveHoldMs: durationDetails.effectiveHoldMs
         }));
-        if (segment.commands.length > 0) {
+        // 第一个回程由 startCommands 启动前端 Narration 专用 0/2/4/6 秒展示队列；
+        // 组内 Step2-4 不再作为独立 MQTT/回程步骤执行。第二回程只执行 Step5 原有展示命令。
+        const commands = groupPosition === 0 ? firstSegment.commands : lastSegment.commands;
+        if (commands.length > 0) {
           logger.info('[讲解] 准备切换IOC展示步骤', sessionDetails(session, {
-            segment: `${segment.index}/${session.definition.segments.length}`, commands: segment.commands
+            returnGroup: `${groupPosition + 1}/${returnGroups.length}`,
+            segments: segments.map((segment) => segment.index), commands
           }));
-          const stepResult = await commandExecutor.publishFrontendCommands(segment.commands, {
-            source: `narration:${session.scenario}:segment-${segment.index}`,
+          const stepResult = await commandExecutor.publishFrontendCommands(commands, {
+            source: `narration:${session.scenario}:segment-${lastSegment.index}`,
             requestId: session.requestId, sessionId: session.id
           });
           if (!stepResult.ok) {
             logger.error('[讲解] IOC展示步骤切换失败', sessionDetails(session, {
-              stage: 'ioc-step', index: segment.index, error: stepResult.error
+              stage: 'ioc-step', index: lastSegment.index, error: stepResult.error
             }));
             return;
           }
         }
         if (session.abortController.signal.aborted) return;
         const callbackResult = await callbackClient.sendAgentMessage(session.context, {
-          body: content.text, signal: session.abortController.signal, requestId: session.requestId,
-          sessionId: session.id, scenario: session.scenario, segmentIndex: segment.index,
+          body: content.map((item) => item.text).join(''), signal: session.abortController.signal, requestId: session.requestId,
+          sessionId: session.id, scenario: session.scenario, segmentIndex: firstSegment.index,
           segmentCount: session.definition.segments.length
         });
         logger.info('[讲解] 播报段回程处理完成', sessionDetails(session, {
-          segment: `${segment.index}/${session.definition.segments.length}`, ok: callbackResult.ok, status: callbackResult.status
+          returnGroup: `${groupPosition + 1}/${returnGroups.length}`,
+          segments: segments.map((segment) => segment.index), ok: callbackResult.ok, status: callbackResult.status
         }));
         if (!callbackResult.ok && !session.abortController.signal.aborted) {
           logger.warn('[讲解] 回程失败但将继续既定流程', sessionDetails(session, {
-            stage: 'callback', index: segment.index,
+            stage: 'callback', index: firstSegment.index,
             status: callbackResult.status, error: callbackResult.error
           }));
         }
         if (session.abortController.signal.aborted) return;
         if (durationDetails.minimumIocHoldMs > 0) {
           logger.info('[讲解] IOC最小保持时间计算', sessionDetails(session, {
-            segment: `${segment.index}/${session.definition.segments.length}`, ...durationDetails
+            returnGroup: `${groupPosition + 1}/${returnGroups.length}`, ...durationDetails
           }));
         }
         const durationMs = durationDetails.effectiveHoldMs;
         logger.info('[讲解] 播报段等待开始', sessionDetails(session, {
-          segment: `${segment.index}/${session.definition.segments.length}`,
+          returnGroup: `${groupPosition + 1}/${returnGroups.length}`,
+          segments: segments.map((segment) => segment.index),
           durationMs: durationDetails.speechDurationMs,
           scaledDurationMs: durationDetails.scaledSpeechDurationMs,
           ttsStartupBufferMs: durationDetails.ttsStartupBufferMs,
@@ -194,8 +250,9 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
           effectiveHoldMs: durationMs
         }));
         await wait(durationMs, session.abortController.signal);
-        logger.info('[讲解] Narration segment等待完成', sessionDetails(session, {
-          segment: `${segment.index}/${session.definition.segments.length}`
+        logger.info('[讲解] Narration 回程等待完成', sessionDetails(session, {
+          returnGroup: `${groupPosition + 1}/${returnGroups.length}`,
+          segments: segments.map((segment) => segment.index)
         }));
       }
       completedNormally = true;
@@ -255,4 +312,7 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
   };
 }
 
-module.exports = { createNarrationSessionManager, sleep, getEffectiveSegmentDurationMs, getSegmentDurationDetails };
+module.exports = {
+  createNarrationSessionManager, sleep, getEffectiveSegmentDurationMs, getSegmentDurationDetails,
+  getReturnGroups, getReturnGroupDurationDetails
+};
