@@ -448,28 +448,32 @@ test('a stuck old narration cannot hold a new HTTP request before 202 admission'
   }
 });
 
-test('park realtime narration sends five Chinese segments in IOC step/callback/wait order and finishes without cancel', async () => {
+test('park realtime Narration 2.0 sends two callbacks: Steps1-4 combined, then Step5', async () => {
   const executor = commandExecutor();
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
-  for (let index = 1; index <= 5; index += 1) {
+  const expectedBodies = [realtimeZhTexts.slice(0, 4).join(''), realtimeZhTexts[4]];
+  const expectedWaits = [14000 + 5000 + 7500 + 9500 + 7000 + 1000, 17000 + 2000];
+  for (let index = 1; index <= 2; index += 1) {
     await eventually(() => clock.calls.length === index && callback.calls.length === index);
-    assert.equal(callback.calls[index - 1].options.body, realtimeZhTexts[index - 1]);
+    assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
+    assert.equal(clock.calls[index - 1].ms, expectedWaits[index - 1]);
     if (index === 1) {
       assert.deepEqual(executor.calls[0].commands, PARK_REALTIME_NARRATION.prepareCommands);
       assert.deepEqual(executor.calls[1].commands, PARK_REALTIME_NARRATION.startCommands);
       assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-1')), false);
     } else {
-      const stepCall = executor.calls.find((call) => call.meta.source.endsWith(`segment-${index}`));
-      assert.deepEqual(stepCall.commands, PARK_REALTIME_NARRATION.segments[index - 1].commands);
+      const stepCall = executor.calls.find((call) => call.meta.source.endsWith('segment-5'));
+      assert.deepEqual(stepCall.commands, PARK_REALTIME_NARRATION.segments[4].commands);
     }
     clock.calls[index - 1].resolve();
   }
   await started.session.runPromise;
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
   assert.equal(executor.calls.some((call) => call.meta.source.endsWith(':cancel')), false);
+  for (const index of [2, 3, 4]) assert.equal(executor.calls.some((call) => call.meta.source.endsWith(`segment-${index}`)), false);
 });
 
 test('park realtime narration uses frozen English text, defaults language to Chinese, and scales every duration', async () => {
@@ -483,21 +487,20 @@ test('park realtime narration uses frozen English text, defaults language to Chi
   });
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
-  assert.deepEqual(callback.calls.map((call) => call.options.body), realtimeEnTexts);
-  assert.deepEqual(durations, [12000, 9600, 5700, 9650, 9000, 3700]);
+  assert.deepEqual(callback.calls.map((call) => call.options.body), [realtimeEnTexts.slice(0, 4).join(''), realtimeEnTexts[4]]);
+  assert.deepEqual(durations, [12000, 11950, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
 });
 
-test('segment callback failures continue to later steps and a segment-three preemption cancels without finish', async () => {
+test('Narration 2.0 callback failure continues to Step5 and preemption prevents the second return', async () => {
   const executor = commandExecutor();
   const callback = callbackClient([
-    { ok: true, status: 200 }, { ok: false, status: 500, error: 'callback failed' },
-    { ok: true, status: 200 }, { ok: true, status: 200 }, { ok: false, status: null, error: 'timeout' }
+    { ok: false, status: 500, error: 'callback failed' }, { ok: false, status: null, error: 'timeout' }
   ]);
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: async () => {} });
   const completed = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
   await completed.session.runPromise;
-  assert.equal(callback.calls.length, 5);
+  assert.equal(callback.calls.length, 2);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
 
   const preemptExecutor = commandExecutor();
@@ -506,20 +509,17 @@ test('segment callback failures continue to later steps and a segment-three pree
     commandExecutor: preemptExecutor, callbackClient: callbackClient(), logger: logger(), wait: preemptClock.wait
   });
   const first = preemptManager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
-  for (let index = 1; index <= 3; index += 1) {
-    await eventually(() => preemptClock.calls.length === index);
-    if (index < 3) preemptClock.calls[index - 1].resolve();
-  }
+  await eventually(() => preemptClock.calls.length === 1 && callback.calls.length === 2);
   const second = preemptManager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:cancel'));
-  assert.equal(preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:segment-4'), false);
+  assert.equal(preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:segment-5'), false);
   assert.equal(preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:complete'), false);
-  await eventually(() => preemptClock.calls.length === 4);
+  await eventually(() => preemptClock.calls.length === 2);
   await preemptManager.cancelActiveNarration('test');
   await Promise.all([first.session.runPromise, second.session.runPromise]);
 });
 
-test('HTTP mock E2E sends park realtime callbacks and MQTT select2-to-select5 before final finish', async () => {
+test('HTTP mock E2E sends two park realtime callbacks and only the Step5 MQTT select', async () => {
   const messages = [];
   const ingress = await startHttpServer(async (req, res) => {
     messages.push(await readJson(req));
@@ -543,41 +543,43 @@ test('HTTP mock E2E sends park realtime callbacks and MQTT select2-to-select5 be
       })
     });
     assert.equal(response.status, 202);
-    for (let index = 1; index <= 5; index += 1) {
+    const expectedBodies = [realtimeZhTexts.slice(0, 4).join(''), realtimeZhTexts[4]];
+    for (let index = 1; index <= 2; index += 1) {
       await eventually(() => messages.length === index && clock.calls.length === index);
-      assert.equal(messages[index - 1].body, realtimeZhTexts[index - 1]);
-      if (index > 1) {
-        assert.deepEqual(JSON.parse(publisher.calls[index]), PARK_REALTIME_NARRATION.segments[index - 1].commands);
+      assert.equal(messages[index - 1].body, expectedBodies[index - 1]);
+      if (index === 2) {
+        assert.deepEqual(JSON.parse(publisher.calls[2]), PARK_REALTIME_NARRATION.segments[4].commands);
       }
       clock.calls[index - 1].resolve();
     }
-    await eventually(() => publisher.calls.length === 7);
+    await eventually(() => publisher.calls.length === 4);
     assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_REALTIME_NARRATION.prepareCommands);
     assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_REALTIME_NARRATION.startCommands);
-    assert.deepEqual(JSON.parse(publisher.calls[6]), PARK_REALTIME_NARRATION.completeCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[3]), PARK_REALTIME_NARRATION.completeCommands);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await ingress.close();
   }
 });
 
-test('security realtime narration sends five frozen Chinese segments in step/callback/wait order and never mixes no-hard-hat flows', async () => {
+test('security Narration 2.0 sends two frozen Chinese returns and never mixes no-hard-hat flows', async () => {
   const executor = commandExecutor();
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
   const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
 
-  for (let index = 1; index <= 5; index += 1) {
+  const expectedBodies = [securityZhTexts.slice(0, 4).join(''), securityZhTexts[4]];
+  for (let index = 1; index <= 2; index += 1) {
     await eventually(() => clock.calls.length === index && callback.calls.length === index);
-    assert.equal(callback.calls[index - 1].options.body, securityZhTexts[index - 1]);
+    assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
     if (index === 1) {
       assert.deepEqual(executor.calls[0].commands, SECURITY_REALTIME_NARRATION.prepareCommands);
       assert.deepEqual(executor.calls[1].commands, SECURITY_REALTIME_NARRATION.startCommands);
       assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-1')), false);
     } else {
-      const stepCall = executor.calls.find((call) => call.meta.source.endsWith(`segment-${index}`));
-      assert.deepEqual(stepCall.commands, SECURITY_REALTIME_NARRATION.segments[index - 1].commands);
+      const stepCall = executor.calls.find((call) => call.meta.source.endsWith('segment-5'));
+      assert.deepEqual(stepCall.commands, SECURITY_REALTIME_NARRATION.segments[4].commands);
     }
     clock.calls[index - 1].resolve();
   }
@@ -601,18 +603,17 @@ test('security narration preserves frozen English text, defaults language to Chi
   });
   const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
-  assert.deepEqual(callback.calls.map((call) => call.options.body), securityEnTexts);
-  assert.deepEqual(durations, [12000, 6600, 8600, 7600, 6600, 3700]);
+  assert.deepEqual(callback.calls.map((call) => call.options.body), [securityEnTexts.slice(0, 4).join(''), securityEnTexts[4]]);
+  assert.deepEqual(durations, [12000, 8900, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, SECURITY_REALTIME_NARRATION.completeCommands);
 });
 
-test('security callback failures continue, while segment-three preemption sends security cancel without later steps or finish', async () => {
+test('security Narration 2.0 callback failures continue and preemption cancels before Step5', async () => {
   const completedExecutor = commandExecutor();
   const completed = createNarrationSessionManager({
     commandExecutor: completedExecutor,
     callbackClient: callbackClient([
-      { ok: true, status: 200 }, { ok: false, status: 500, error: 'callback failed' },
-      { ok: true, status: 200 }, { ok: true, status: 200 }, { ok: false, status: null, error: 'timeout' }
+      { ok: false, status: 500, error: 'callback failed' }, { ok: false, status: null, error: 'timeout' }
     ]),
     logger: logger(), wait: async () => {}
   });
@@ -627,25 +628,22 @@ test('security callback failures continue, while segment-three preemption sends 
     commandExecutor: executor, callbackClient: preemptCallback, logger: logger(), wait: clock.wait
   });
   const first = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
-  for (let index = 1; index <= 3; index += 1) {
-    await eventually(() => clock.calls.length === index);
-    if (index < 3) clock.calls[index - 1].resolve();
-  }
+  await eventually(() => clock.calls.length === 1 && preemptCallback.calls.length === 1);
   const second = manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:cancel'));
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:segment-4'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:segment-5'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:complete'), false);
-  await eventually(() => clock.calls.length === 4);
-  assert.deepEqual(preemptCallback.calls.slice(0, 3).map((call) => call.options.body), securityZhTexts.slice(0, 3));
-  assert.ok(preemptCallback.calls.slice(0, 3).every((call) => call.sessionContext.replyTo === 'userA@example.com'));
-  assert.equal(preemptCallback.calls[3].sessionContext.replyTo, 'userB@example.com');
-  assert.equal(preemptCallback.calls[3].options.body, zhText);
+  await eventually(() => clock.calls.length === 2);
+  assert.equal(preemptCallback.calls[0].options.body, securityZhTexts.slice(0, 4).join(''));
+  assert.equal(preemptCallback.calls[0].sessionContext.replyTo, 'userA@example.com');
+  assert.equal(preemptCallback.calls[1].sessionContext.replyTo, 'userB@example.com');
+  assert.equal(preemptCallback.calls[1].options.body, zhText);
   await manager.cancelActiveNarration('test');
   await Promise.all([first.session.runPromise, second.session.runPromise]);
 });
 
-test('security HTTP mock E2E returns 202 then publishes five steps, five callbacks, and finish without no-hard-hat commands', async () => {
+test('security HTTP mock E2E returns 202 then publishes two callbacks and only Step5 without no-hard-hat commands', async () => {
   const messages = [];
   const ingress = await startHttpServer(async (req, res) => {
     messages.push(await readJson(req));
@@ -669,16 +667,17 @@ test('security HTTP mock E2E returns 202 then publishes five steps, five callbac
       })
     });
     assert.equal(response.status, 202);
-    for (let index = 1; index <= 5; index += 1) {
+    const expectedBodies = [securityZhTexts.slice(0, 4).join(''), securityZhTexts[4]];
+    for (let index = 1; index <= 2; index += 1) {
       await eventually(() => messages.length === index && clock.calls.length === index);
-      assert.equal(messages[index - 1].body, securityZhTexts[index - 1]);
-      if (index > 1) assert.deepEqual(JSON.parse(publisher.calls[index]), SECURITY_REALTIME_NARRATION.segments[index - 1].commands);
+      assert.equal(messages[index - 1].body, expectedBodies[index - 1]);
+      if (index === 2) assert.deepEqual(JSON.parse(publisher.calls[2]), SECURITY_REALTIME_NARRATION.segments[4].commands);
       clock.calls[index - 1].resolve();
     }
-    await eventually(() => publisher.calls.length === 7);
+    await eventually(() => publisher.calls.length === 4);
     assert.deepEqual(JSON.parse(publisher.calls[0]), SECURITY_REALTIME_NARRATION.prepareCommands);
     assert.deepEqual(JSON.parse(publisher.calls[1]), SECURITY_REALTIME_NARRATION.startCommands);
-    assert.deepEqual(JSON.parse(publisher.calls[6]), SECURITY_REALTIME_NARRATION.completeCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[3]), SECURITY_REALTIME_NARRATION.completeCommands);
     assert.doesNotMatch(publisher.calls.join('\n'), /security\.noHardHatAlert|noHardHatFullFlow|video\/open/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -686,23 +685,24 @@ test('security HTTP mock E2E returns 202 then publishes five steps, five callbac
   }
 });
 
-test('energy realtime narration sends five frozen Chinese segments in step/callback/wait order and never mixes other energy businesses', async () => {
+test('energy Narration 2.0 sends two frozen Chinese returns and never mixes other energy businesses', async () => {
   const executor = commandExecutor();
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
   const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
 
-  for (let index = 1; index <= 5; index += 1) {
+  const expectedBodies = [energyZhTexts.slice(0, 4).join(''), energyZhTexts[4]];
+  for (let index = 1; index <= 2; index += 1) {
     await eventually(() => clock.calls.length === index && callback.calls.length === index);
-    assert.equal(callback.calls[index - 1].options.body, energyZhTexts[index - 1]);
+    assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
     if (index === 1) {
       assert.deepEqual(executor.calls[0].commands, ENERGY_REALTIME_NARRATION.prepareCommands);
       assert.deepEqual(executor.calls[1].commands, ENERGY_REALTIME_NARRATION.startCommands);
       assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-1')), false);
     } else {
-      const stepCall = executor.calls.find((call) => call.meta.source.endsWith(`segment-${index}`));
-      assert.deepEqual(stepCall.commands, ENERGY_REALTIME_NARRATION.segments[index - 1].commands);
+      const stepCall = executor.calls.find((call) => call.meta.source.endsWith('segment-5'));
+      assert.deepEqual(stepCall.commands, ENERGY_REALTIME_NARRATION.segments[4].commands);
     }
     clock.calls[index - 1].resolve();
   }
@@ -725,18 +725,17 @@ test('energy narration preserves frozen English text, defaults language to Chine
   });
   const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
-  assert.deepEqual(callback.calls.map((call) => call.options.body), energyEnTexts);
-  assert.deepEqual(durations, [12000, 9150, 5900, 8700, 9000, 3700]);
+  assert.deepEqual(callback.calls.map((call) => call.options.body), [energyEnTexts.slice(0, 4).join(''), energyEnTexts[4]]);
+  assert.deepEqual(durations, [12000, 9750, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, ENERGY_REALTIME_NARRATION.completeCommands);
 });
 
-test('energy callback failures continue, while segment-three preemption sends energy cancel without later steps or finish', async () => {
+test('energy Narration 2.0 callback failures continue and preemption cancels before Step5', async () => {
   const completedExecutor = commandExecutor();
   const completed = createNarrationSessionManager({
     commandExecutor: completedExecutor,
     callbackClient: callbackClient([
-      { ok: true, status: 200 }, { ok: false, status: 500, error: 'callback failed' },
-      { ok: true, status: 200 }, { ok: true, status: 200 }, { ok: false, status: null, error: 'timeout' }
+      { ok: false, status: 500, error: 'callback failed' }, { ok: false, status: null, error: 'timeout' }
     ]),
     logger: logger(), wait: async () => {}
   });
@@ -751,25 +750,22 @@ test('energy callback failures continue, while segment-three preemption sends en
     commandExecutor: executor, callbackClient: preemptCallback, logger: logger(), wait: clock.wait
   });
   const first = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
-  for (let index = 1; index <= 3; index += 1) {
-    await eventually(() => clock.calls.length === index);
-    if (index < 3) clock.calls[index - 1].resolve();
-  }
+  await eventually(() => clock.calls.length === 1 && preemptCallback.calls.length === 1);
   const second = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:cancel'));
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:segment-4'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:segment-5'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:complete'), false);
-  await eventually(() => clock.calls.length === 4);
-  assert.deepEqual(preemptCallback.calls.slice(0, 3).map((call) => call.options.body), energyZhTexts.slice(0, 3));
-  assert.ok(preemptCallback.calls.slice(0, 3).every((call) => call.sessionContext.replyTo === 'userA@example.com'));
-  assert.equal(preemptCallback.calls[3].sessionContext.replyTo, 'userB@example.com');
-  assert.equal(preemptCallback.calls[3].options.body, realtimeZhTexts[0]);
+  await eventually(() => clock.calls.length === 2);
+  assert.equal(preemptCallback.calls[0].options.body, energyZhTexts.slice(0, 4).join(''));
+  assert.equal(preemptCallback.calls[0].sessionContext.replyTo, 'userA@example.com');
+  assert.equal(preemptCallback.calls[1].sessionContext.replyTo, 'userB@example.com');
+  assert.equal(preemptCallback.calls[1].options.body, realtimeZhTexts.slice(0, 4).join(''));
   await manager.cancelActiveNarration('test');
   await Promise.all([first.session.runPromise, second.session.runPromise]);
 });
 
-test('energy HTTP mock E2E returns 202 then publishes five steps, five callbacks, and finish without extra energy commands', async () => {
+test('energy HTTP mock E2E returns 202 then publishes two callbacks and only Step5 without extra energy commands', async () => {
   const messages = [];
   const ingress = await startHttpServer(async (req, res) => {
     messages.push(await readJson(req));
@@ -793,16 +789,17 @@ test('energy HTTP mock E2E returns 202 then publishes five steps, five callbacks
       })
     });
     assert.equal(response.status, 202);
-    for (let index = 1; index <= 5; index += 1) {
+    const expectedBodies = [energyZhTexts.slice(0, 4).join(''), energyZhTexts[4]];
+    for (let index = 1; index <= 2; index += 1) {
       await eventually(() => messages.length === index && clock.calls.length === index);
-      assert.equal(messages[index - 1].body, energyZhTexts[index - 1]);
-      if (index > 1) assert.deepEqual(JSON.parse(publisher.calls[index]), ENERGY_REALTIME_NARRATION.segments[index - 1].commands);
+      assert.equal(messages[index - 1].body, expectedBodies[index - 1]);
+      if (index === 2) assert.deepEqual(JSON.parse(publisher.calls[2]), ENERGY_REALTIME_NARRATION.segments[4].commands);
       clock.calls[index - 1].resolve();
     }
-    await eventually(() => publisher.calls.length === 7);
+    await eventually(() => publisher.calls.length === 4);
     assert.deepEqual(JSON.parse(publisher.calls[0]), ENERGY_REALTIME_NARRATION.prepareCommands);
     assert.deepEqual(JSON.parse(publisher.calls[1]), ENERGY_REALTIME_NARRATION.startCommands);
-    assert.deepEqual(JSON.parse(publisher.calls[6]), ENERGY_REALTIME_NARRATION.completeCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[3]), ENERGY_REALTIME_NARRATION.completeCommands);
     assert.doesNotMatch(publisher.calls.join('\n'), ENERGY_FORBIDDEN_COMMANDS);
   } finally {
     await new Promise((resolve) => server.close(resolve));
