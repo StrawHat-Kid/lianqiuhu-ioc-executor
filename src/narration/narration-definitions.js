@@ -1,4 +1,4 @@
-const PARK_BASE_OVERVIEW_ACTION = '讲解园区基础底数';
+const PARK_BASE_OVERVIEW_ACTION = '讲解园区基础信息';
 const PARK_REALTIME_NARRATION_ACTION = '讲解综合运行态势';
 const SECURITY_REALTIME_NARRATION_ACTION = '讲解安防实时态势';
 const ENERGY_REALTIME_NARRATION_ACTION = '讲解能源与能效实时态势';

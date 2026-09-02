@@ -92,18 +92,18 @@ test('context envelope executes commands through the same translator and does no
 
 test('third-party AI actions have identical legacy and envelope MQTT output without callback', async () => {
   const cases = [
-    ['启动安防第三方AI', [
+    ['启动园区AI安防智能体', [
       { action: '主题切换', params: { '主题名称': '综合安防' } },
       { action: 'executeCapability', params: { capability: 'security.thirdPartyAgent', command: 'start' } }
     ]],
-    ['取消安防第三方AI', [
+    ['取消园区AI安防智能体', [
       { action: 'executeCapability', params: { capability: 'security.thirdPartyAgent', command: 'cancel' } }
     ]],
-    ['启动能耗第三方AI', [
+    ['启动园区AI能耗智能体', [
       { action: '主题切换', params: { '主题名称': '能源管理' } },
       { action: 'executeCapability', params: { capability: 'energy.thirdPartyAgent', command: 'start' } }
     ]],
-    ['取消能耗第三方AI', [
+    ['取消园区AI能耗智能体', [
       { action: 'executeCapability', params: { capability: 'energy.thirdPartyAgent', command: 'cancel' } }
     ]]
   ];
@@ -130,7 +130,7 @@ test('HTTP rejects envelope commands that are not arrays', async () => {
 
 test('Narration旧数组400会记录请求体、请求ID和缺少context原因', async () => {
   const logger = createCaptureLogger();
-  const result = await postCommands([{ action: '讲解园区基础底数', params: { language: 'zh-CN' } }], { logger });
+  const result = await postCommands([{ action: '讲解园区基础信息', params: { language: 'zh-CN' } }], { logger });
   assert.equal(result.response.status, 400);
   const rejected = logger.entries.find((entry) => entry.message.includes('请求被拒绝'));
   assert.match(rejected.message, /必须携带context上下文/);
@@ -143,7 +143,7 @@ test('Narration信封缺callback会明确记录context.callback缺失', async ()
   const logger = createCaptureLogger();
   const result = await postCommands({
     context: { agent: 'test-agent', reply_to: 'test-user', groupchat: false },
-    commands: [{ action: '讲解园区基础底数', params: { language: 'zh-CN' } }]
+    commands: [{ action: '讲解园区基础信息', params: { language: 'zh-CN' } }]
   }, { logger });
   assert.equal(result.response.status, 400);
   assert.ok(logger.entries.some((entry) => entry.message.includes('context.callback缺失')));
@@ -162,7 +162,7 @@ test('完整Narration信封返回202并把requestId传入会话准入', async ()
   };
   const result = await postCommands({
     context: { agent: 'test-agent', reply_to: 'test-user', groupchat: false, callback: 'http://127.0.0.1:29876/agent/send' },
-    commands: [{ action: '讲解园区基础底数', params: { language: 'zh-CN' } }]
+    commands: [{ action: '讲解园区基础信息', params: { language: 'zh-CN' } }]
   }, { logger, narrationManager });
   assert.equal(result.response.status, 202);
   assert.match(calls[0].requestId, /^req-/);
@@ -171,7 +171,7 @@ test('完整Narration信封返回202并把requestId传入会话准入', async ()
 
 test('普通第三方AI旧数组200会记录无需RUISI回程', async () => {
   const logger = createCaptureLogger();
-  const result = await postCommands([{ action: '启动安防第三方AI', params: {} }], { logger });
+  const result = await postCommands([{ action: '启动园区AI安防智能体', params: {} }], { logger });
   assert.equal(result.response.status, 200);
   assert.ok(logger.entries.some((entry) => entry.message.includes('无需RUISI回程')));
 });

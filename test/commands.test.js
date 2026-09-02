@@ -174,7 +174,7 @@ const expectedBusinessDefinitions = [
   ['园区总览', [frontendTheme('综合态势'), frontendCapability('situation.parkOverview', 'start')], null],
   ['园区实时运营情况', [frontendTheme('综合态势'), frontendCapability('situation.parkRealTimeOperation', 'start')], [frontendCapability('situation.parkRealTimeOperation', 'cancel')]],
   ['未佩戴安全帽告警', [frontendTheme('综合安防'), frontendCapability('security.noHardHatAlert', 'start'), frontendCommand('executeOperation', { capability: 'security.noHardHatAlert', operation: 'video', command: 'open' })], [frontendCapability('security.noHardHatAlert', 'cancel')]],
-  ['安防第三方AI', [frontendTheme('综合安防'), frontendCapability('security.thirdPartyAgent', 'start')], [frontendCapability('security.thirdPartyAgent', 'cancel')]],
+  ['园区AI安防智能体', [frontendTheme('综合安防'), frontendCapability('security.thirdPartyAgent', 'start')], [frontendCapability('security.thirdPartyAgent', 'cancel')]],
   ['火灾预警', [frontendTheme('综合安防'), frontendCapability('security.fireAlarmAlert', 'start'), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'open' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'close' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyTeam', command: 'notify' }), frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'smsNotification', command: 'notify', radius: 100 })], [frontendCapability('security.fireAlarmAlert', 'cancel')]],
   ['智慧考勤统计', [frontendTheme('便捷通行'), frontendCapability('access.smartAttendanceAlert', 'start')], [frontendCapability('access.smartAttendanceAlert', 'cancel')]],
   ['资产盘点', [frontendTheme('资产管理'), frontendCapability('asset.assetInventory', 'start'), frontendCommand('executeOperation', { capability: 'asset.assetInventory', operation: 'trajectory', command: 'toggle' })], [frontendCapability('asset.assetInventory', 'cancel')]],
@@ -185,7 +185,7 @@ const expectedBusinessDefinitions = [
   ['能流分析', [frontendTheme('能源管理'), frontendCapability('energy.energyFlow', 'start')], [frontendCapability('energy.energyFlow', 'cancel')]],
   ['光伏监测', [frontendTheme('能源管理'), frontendCapability('energy.photovoltaicMonitoring', 'start')], [frontendCapability('energy.photovoltaicMonitoring', 'cancel')]],
   ['充电桩管理', [frontendTheme('能源管理'), frontendCapability('energy.chargingPileManagement', 'start')], [frontendCapability('energy.chargingPileManagement', 'cancel')]],
-  ['能耗第三方AI', [frontendTheme('能源管理'), frontendCapability('energy.thirdPartyAgent', 'start')], [frontendCapability('energy.thirdPartyAgent', 'cancel')]],
+  ['园区AI能耗智能体', [frontendTheme('能源管理'), frontendCapability('energy.thirdPartyAgent', 'start')], [frontendCapability('energy.thirdPartyAgent', 'cancel')]],
   ['VIP会议室', [frontendTheme('办公会议'), frontendCapability('office.harmonyMeetingRoom', 'start'), frontendCommand('executeOperation', { capability: 'office.harmonyMeetingRoom', operation: 'meetingRoom', command: 'select', roomId: 'meeting-room1' })], [frontendCapability('office.harmonyMeetingRoom', 'cancel')]],
   ['Wi-Fi防偷拍检测', [frontendTheme('办公会议'), frontendCapability('office.wifiAntiSpyAlert', 'start'), frontendCommand('executeOperation', { capability: 'office.wifiAntiSpyAlert', operation: 'workOrder', command: 'dispatch' })], [frontendCapability('office.wifiAntiSpyAlert', 'cancel')]],
   ['办公网络', [frontendTheme('网络体验'), frontendCapability('network.officeNetwork', 'start')], [frontendCapability('network.officeNetwork', 'cancel')]],
@@ -296,18 +296,18 @@ test('four basic parameterized frontend controls retain their own parameter vali
 
 test('third-party AI semantics use only their own frozen theme and capability lifecycle commands', async () => {
   const cases = [
-    ['启动安防第三方AI', [
+    ['启动园区AI安防智能体', [
       { action: '主题切换', params: { '主题名称': '综合安防' } },
       { action: 'executeCapability', params: { capability: 'security.thirdPartyAgent', command: 'start' } }
     ]],
-    ['取消安防第三方AI', [
+    ['取消园区AI安防智能体', [
       { action: 'executeCapability', params: { capability: 'security.thirdPartyAgent', command: 'cancel' } }
     ]],
-    ['启动能耗第三方AI', [
+    ['启动园区AI能耗智能体', [
       { action: '主题切换', params: { '主题名称': '能源管理' } },
       { action: 'executeCapability', params: { capability: 'energy.thirdPartyAgent', command: 'start' } }
     ]],
-    ['取消能耗第三方AI', [
+    ['取消园区AI能耗智能体', [
       { action: 'executeCapability', params: { capability: 'energy.thirdPartyAgent', command: 'cancel' } }
     ]]
   ];

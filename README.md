@@ -67,7 +67,7 @@ HC_NARRATION_DURATION_SCALE=0.1
 
 ```json
 [
-  { "action": "启动安防第三方AI", "params": {} }
+  { "action": "启动园区AI安防智能体", "params": {} }
 ]
 ```
 
@@ -83,7 +83,7 @@ HC_NARRATION_DURATION_SCALE=0.1
     "timestamp": "2026-08-24T20:00:00Z"
   },
   "commands": [
-    { "action": "启动安防第三方AI", "params": {} }
+    { "action": "启动园区AI安防智能体", "params": {} }
   ]
 }
 ```
@@ -96,7 +96,7 @@ HC_NARRATION_DURATION_SCALE=0.1
 
 | 正式 action | 前端 capability | 正常结束 |
 | --- | --- | --- |
-| `讲解园区基础底数` | `situation.parkOverviewNarration` | `cancel` |
+| `讲解园区基础信息` | `situation.parkOverviewNarration` | `cancel` |
 | `讲解综合运行态势` | `situation.parkRealtimeNarration` | `finish` |
 | `讲解安防实时态势` | `security.realtimeSituation` | `finish` |
 | `讲解能源与能效实时态势` | `energy.realtimeSituation` | `finish` |
@@ -124,7 +124,7 @@ Narration `params` 仅支持 `language`：`zh` / `zh-CN` / `en` / `en-US`；省�
     "callback": "http://.../agent/send"
   },
   "commands": [
-    { "action": "讲解园区基础底数", "params": { "language": "zh-CN" } }
+    { "action": "讲解园区基础信息", "params": { "language": "zh-CN" } }
   ]
 }
 ```
@@ -137,10 +137,10 @@ Narration `params` 仅支持 `language`：`zh` / `zh-CN` / `en` / `en-US`；省�
 
 | action | 前端 commands |
 | --- | --- |
-| `启动安防第三方AI` | `主题切换: 综合安防` → `security.thirdPartyAgent start` |
-| `取消安防第三方AI` | `security.thirdPartyAgent cancel` |
-| `启动能耗第三方AI` | `主题切换: 能源管理` → `energy.thirdPartyAgent start` |
-| `取消能耗第三方AI` | `energy.thirdPartyAgent cancel` |
+| `启动园区AI安防智能体` | `主题切换: 综合安防` → `security.thirdPartyAgent start` |
+| `取消园区AI安防智能体` | `security.thirdPartyAgent cancel` |
+| `启动园区AI能耗智能体` | `主题切换: 能源管理` → `energy.thirdPartyAgent start` |
+| `取消园区AI能耗智能体` | `energy.thirdPartyAgent cancel` |
 
 取消第三方 AI 不切换专题。
 

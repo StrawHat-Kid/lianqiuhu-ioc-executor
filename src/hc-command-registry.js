@@ -18,7 +18,7 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
     command('executeOperation', { capability: 'security.noHardHatAlert', operation: 'video', command: 'open' })
   ]), cancel: Object.freeze([capability('security.noHardHatAlert', 'cancel')]) }),
   // HC 第三方平台仅控制 iframe/Dialog，不属于 Narration，也不依赖 callback。
-  Object.freeze({ name: '安防第三方AI', start: Object.freeze([
+  Object.freeze({ name: '园区AI安防智能体', start: Object.freeze([
     theme('综合安防'), capability('security.thirdPartyAgent', 'start')
   ]), cancel: Object.freeze([capability('security.thirdPartyAgent', 'cancel')]) }),
   // fireAlarmFullFlow：短信 radius=100 为前端冻结参数。
@@ -71,7 +71,7 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
   Object.freeze({ name: '充电桩管理', start: Object.freeze([
     theme('能源管理'), capability('energy.chargingPileManagement', 'start')
   ]), cancel: Object.freeze([capability('energy.chargingPileManagement', 'cancel')]) }),
-  Object.freeze({ name: '能耗第三方AI', start: Object.freeze([
+  Object.freeze({ name: '园区AI能耗智能体', start: Object.freeze([
     theme('能源管理'), capability('energy.thirdPartyAgent', 'start')
   ]), cancel: Object.freeze([capability('energy.thirdPartyAgent', 'cancel')]) }),
   Object.freeze({ name: 'VIP会议室', start: Object.freeze([
