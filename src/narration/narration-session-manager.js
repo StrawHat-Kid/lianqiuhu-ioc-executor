@@ -103,6 +103,16 @@ function getReturnGroupDurationDetails(segments, language, durationScale) {
   };
 }
 
+function getReturnGroupWaitMs(definition, groupPosition, groupCount, language, fallbackDelayMs) {
+  // Narration 2.0 当前只有两个回程：显式配置只定义第一回程到第二回程的间隔，
+  // 不能影响 Step5 自身的正式时序。未配置时保持旧版按 step 元数据推导的等待。
+  if (groupPosition !== 0 || groupCount < 2) return fallbackDelayMs;
+  const configuredDelayMs = definition.returnGroupDelayMs?.[language];
+  return Number.isFinite(configuredDelayMs) && configuredDelayMs >= 0
+    ? Math.round(configuredDelayMs)
+    : fallbackDelayMs;
+}
+
 function createNarrationSessionManager({ commandExecutor, callbackClient, logger, durationScale = 1, wait = sleep } = {}) {
   if (!commandExecutor || typeof commandExecutor.publishFrontendCommands !== 'function') {
     throw new Error('narration command executor is required');
@@ -238,7 +248,9 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
             returnGroup: `${groupPosition + 1}/${returnGroups.length}`, ...durationDetails
           }));
         }
-        const durationMs = durationDetails.effectiveHoldMs;
+        const durationMs = getReturnGroupWaitMs(
+          session.definition, groupPosition, returnGroups.length, session.language, durationDetails.effectiveHoldMs
+        );
         logger.info('[讲解] 播报段等待开始', sessionDetails(session, {
           returnGroup: `${groupPosition + 1}/${returnGroups.length}`,
           segments: segments.map((segment) => segment.index),
@@ -247,7 +259,8 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
           ttsStartupBufferMs: durationDetails.ttsStartupBufferMs,
           postGapMs: durationDetails.postGapMs,
           minimumIocHoldMs: durationDetails.minimumIocHoldMs,
-          effectiveHoldMs: durationMs
+          effectiveHoldMs: durationDetails.effectiveHoldMs,
+          returnGroupDelayMs: durationMs
         }));
         await wait(durationMs, session.abortController.signal);
         logger.info('[讲解] Narration 回程等待完成', sessionDetails(session, {
@@ -314,5 +327,5 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
 
 module.exports = {
   createNarrationSessionManager, sleep, getEffectiveSegmentDurationMs, getSegmentDurationDetails,
-  getReturnGroups, getReturnGroupDurationDetails
+  getReturnGroups, getReturnGroupDurationDetails, getReturnGroupWaitMs
 };

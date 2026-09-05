@@ -59,6 +59,8 @@ const PARK_REALTIME_NARRATION = Object.freeze({
   action: PARK_REALTIME_NARRATION_ACTION,
   // Narration 2.0: 保留 5 个正式 step 标定，只在运行时按两次回程编排。
   returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
+  // 第一回程下发后到第二回程的现场标定等待；语言别名会在入参校验时归一化。
+  returnGroupDelayMs: Object.freeze({ 'zh-CN': 35000, 'en-US': 38000 }),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合态势' })
   ]),
@@ -123,6 +125,8 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
   action: SECURITY_REALTIME_NARRATION_ACTION,
   // Narration 2.0: 第 1 至 4 段合并回程，第 5 段保持独立回程。
   returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
+  // 第一回程下发后到第二回程的现场标定等待；语言别名会在入参校验时归一化。
+  returnGroupDelayMs: Object.freeze({ 'zh-CN': 25000, 'en-US': 30000 }),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合安防' })
   ]),
@@ -187,6 +191,8 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
   action: ENERGY_REALTIME_NARRATION_ACTION,
   // Narration 2.0: 第 1 至 4 段合并回程，第 5 段保持独立回程。
   returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
+  // 第一回程下发后到第二回程的现场标定等待；语言别名会在入参校验时归一化。
+  returnGroupDelayMs: Object.freeze({ 'zh-CN': 46000, 'en-US': 48000 }),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '能源管理' })
   ]),
