@@ -1,14 +1,16 @@
 const command = (action, params) => Object.freeze({ action, params: Object.freeze({ ...params }) });
 const capability = (name, commandName) => command('executeCapability', { capability: name, command: commandName });
 const theme = (name) => command('主题切换', { '主题名称': name });
+const operationCommand = (capabilityName, operation, commandName, extra = {}) =>
+  command('executeOperation', { capability: capabilityName, operation, command: commandName, ...extra });
 
 // 来源：当前前端 park-ai Scenario Registry 与 Business Command Registry。
 // OSCA 只传本文件中的中文业务名称；capability、operation、固定参数均不得由 OSCA 覆盖。
 const HC_BUSINESS_REGISTRY = Object.freeze([
-  // parkOverview 仅作为产品定义的启动指令暴露；前端 cancel 生命周期不属于 HC 指令集。
+  // 园区总览复用既有 Quick lifecycle；取消仅关闭该 Quick，不改 Narration。
   Object.freeze({ name: '园区总览', start: Object.freeze([
     theme('综合态势'), capability('situation.parkOverview', 'start')
-  ]), cancel: null }),
+  ]), cancel: Object.freeze([capability('situation.parkOverview', 'cancel')]) }),
   Object.freeze({ name: '园区实时运营情况', start: Object.freeze([
     theme('综合态势'), capability('situation.parkRealTimeOperation', 'start')
   ]), cancel: Object.freeze([capability('situation.parkRealTimeOperation', 'cancel')]) }),
@@ -96,7 +98,160 @@ const HC_BUSINESS_REGISTRY = Object.freeze([
   Object.freeze({ name: '方案架构图', start: Object.freeze([
     capability('global.solutionArchitecture', 'start')
   ]), cancel: Object.freeze([capability('global.solutionArchitecture', 'cancel')]) })
+  ,Object.freeze({ name: '场景旋转', start: Object.freeze([
+    capability('global.sceneRotation', 'start')
+  ]), cancel: Object.freeze([capability('global.sceneRotation', 'cancel')]) })
+  ,Object.freeze({ name: '视频监控', start: Object.freeze([
+    theme('综合安防'), capability('security.videoMonitoring', 'start'),
+    operationCommand('security.videoMonitoring', 'camera', 'select', { cameraId: 'B14_HEAT_DIS_1_BALL_CAM1' }),
+    operationCommand('security.videoMonitoring', 'camera', 'select', { cameraId: 'B14_TRANSF_1_BALL_CAM2' }),
+    operationCommand('security.videoMonitoring', 'camera', 'select', { cameraId: 'B14_HEAT_DIS_1_GUN2_CAR' }),
+    operationCommand('security.videoMonitoring', 'camera', 'select', { cameraId: 'B14_HEAT_DIS_1_GUN1_FACE' }),
+    operationCommand('security.videoMonitoring', 'camera', 'select', { cameraId: 'B14_HEAT_DIS_1_PANO_CAM1' })
+  ]), cancel: Object.freeze([capability('security.videoMonitoring', 'cancel')]) })
+  ,Object.freeze({ name: 'AI机器人', start: Object.freeze([
+    theme('综合安防'), capability('security.aiRobot', 'start'),
+    operationCommand('security.aiRobot', 'patrolPoint', 'select', { pointId: 'inspection_point2' })
+  ]), cancel: Object.freeze([capability('security.aiRobot', 'cancel')]) })
+  ,Object.freeze({ name: '安防人员', start: Object.freeze([
+    theme('综合安防'), capability('security.securityPersonnel', 'start'),
+    operationCommand('security.securityPersonnel', 'landmarkPoint', 'select', { index: 0 }),
+    operationCommand('security.securityPersonnel', 'landmarkPoint', 'select', { index: 1 })
+  ]), cancel: Object.freeze([capability('security.securityPersonnel', 'cancel')]) })
+  ,Object.freeze({ name: '安保岗亭', start: Object.freeze([
+    theme('综合安防'), capability('security.securityBooth', 'start'),
+    operationCommand('security.securityBooth', 'landmarkPoint', 'select', { index: 0 })
+  ]), cancel: Object.freeze([capability('security.securityBooth', 'cancel')]) })
+  ,Object.freeze({ name: '人员热力', start: Object.freeze([
+    theme('综合安防'), capability('security.personnelHeatmap', 'start')
+  ]), cancel: Object.freeze([capability('security.personnelHeatmap', 'cancel')]) })
+  ,Object.freeze({ name: '光感周界告警', start: Object.freeze([
+    theme('综合安防'), capability('security.lightPerimeterAlert', 'start')
+  ]), cancel: Object.freeze([capability('security.lightPerimeterAlert', 'cancel')]) })
+  ,Object.freeze({ name: '视频周界预警', start: Object.freeze([
+    theme('综合安防'), capability('security.videoPerimeterAlert', 'start')
+  ]), cancel: Object.freeze([capability('security.videoPerimeterAlert', 'cancel')]) })
+  ,Object.freeze({ name: '鸿蒙人行闸机', start: Object.freeze([
+    theme('便捷通行'), capability('access.harmonyPedestrianGate', 'start')
+  ]), cancel: Object.freeze([capability('access.harmonyPedestrianGate', 'cancel')]) })
+  ,Object.freeze({ name: '便捷通行安保岗亭', start: Object.freeze([
+    theme('便捷通行'), capability('access.securityBooth', 'start'),
+    operationCommand('access.securityBooth', 'landmarkPoint', 'select', { index: 0 })
+  ]), cancel: Object.freeze([capability('access.securityBooth', 'cancel')]) })
+  ,Object.freeze({ name: '班车信息', start: Object.freeze([
+    theme('便捷通行'), capability('access.shuttleBusInfo', 'start'),
+    operationCommand('access.shuttleBusInfo', 'landmarkPoint', 'select', { index: 1 })
+  ]), cancel: Object.freeze([capability('access.shuttleBusInfo', 'cancel')]) })
+  ,Object.freeze({ name: '车辆闸机', start: Object.freeze([
+    theme('便捷通行'), capability('access.vehicleGate', 'start'),
+    operationCommand('access.vehicleGate', 'landmarkPoint', 'select', { index: 0 })
+  ]), cancel: Object.freeze([capability('access.vehicleGate', 'cancel')]) })
+  ,Object.freeze({ name: '车位统计', start: Object.freeze([
+    theme('便捷通行'), capability('access.parkingSpaceStatistics', 'start')
+  ]), cancel: Object.freeze([capability('access.parkingSpaceStatistics', 'cancel')]) })
+  ,Object.freeze({ name: '人员警示列表告警', start: Object.freeze([
+    theme('便捷通行'), capability('access.personWarningAlert', 'start'),
+    operationCommand('access.personWarningAlert', 'trajectory', 'show')
+  ]), cancel: Object.freeze([capability('access.personWarningAlert', 'cancel')]) })
+  ,Object.freeze({ name: '车辆警示列表告警', start: Object.freeze([
+    theme('便捷通行'), capability('access.vehicleWarningAlert', 'start'),
+    operationCommand('access.vehicleWarningAlert', 'trajectory', 'show')
+  ]), cancel: Object.freeze([capability('access.vehicleWarningAlert', 'cancel')]) })
+  ,Object.freeze({ name: '资产围栏', start: Object.freeze([
+    theme('资产管理'), capability('asset.assetFence', 'start')
+  ]), cancel: Object.freeze([capability('asset.assetFence', 'cancel')]) })
+  ,Object.freeze({ name: '冷水机组', start: Object.freeze([
+    theme('设施管理'), capability('facility.chiller', 'start'),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 0 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 1 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 2 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 3 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 4 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 5 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 6 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 7 }),
+    operationCommand('facility.chiller', 'landmarkPoint', 'select', { index: 8 })
+  ]), cancel: Object.freeze([capability('facility.chiller', 'cancel')]) })
+  ,Object.freeze({ name: '设施维修人员', start: Object.freeze([
+    theme('设施管理'), capability('facility.maintenanceStaff', 'start'),
+    operationCommand('facility.maintenanceStaff', 'landmarkPoint', 'select', { index: 0 }),
+    operationCommand('facility.maintenanceStaff', 'landmarkPoint', 'select', { index: 1 })
+  ]), cancel: Object.freeze([capability('facility.maintenanceStaff', 'cancel')]) })
+  ,Object.freeze({ name: 'AI预测性维护告警', start: Object.freeze([
+    theme('设施管理'), capability('facility.aiPredictiveMaintenanceAlert', 'start'),
+    operationCommand('facility.aiPredictiveMaintenanceAlert', 'smartDispatch', 'dispatch'),
+    operationCommand('facility.aiPredictiveMaintenanceAlert', 'smartDispatch', 'advance'),
+    operationCommand('facility.aiPredictiveMaintenanceAlert', 'smartDispatch', 'advance')
+  ]), cancel: Object.freeze([capability('facility.aiPredictiveMaintenanceAlert', 'cancel')]) })
+  ,Object.freeze({ name: '值班人员', start: Object.freeze([
+    theme('能源管理'), capability('energy.dutyPersonnel', 'start'),
+    operationCommand('energy.dutyPersonnel', 'landmarkPoint', 'select', { index: 0 }),
+    operationCommand('energy.dutyPersonnel', 'landmarkPoint', 'select', { index: 1 }),
+    operationCommand('energy.dutyPersonnel', 'landmarkPoint', 'select', { index: 2 })
+  ]), cancel: Object.freeze([capability('energy.dutyPersonnel', 'cancel')]) })
+  ,Object.freeze({ name: '能源维修人员', start: Object.freeze([
+    theme('能源管理'), capability('energy.maintenanceStaff', 'start'),
+    operationCommand('energy.maintenanceStaff', 'landmarkPoint', 'select', { index: 0 }),
+    operationCommand('energy.maintenanceStaff', 'landmarkPoint', 'select', { index: 1 })
+  ]), cancel: Object.freeze([capability('energy.maintenanceStaff', 'cancel')]) })
+  ,Object.freeze({ name: '办公区', start: Object.freeze([
+    theme('办公会议'), capability('office.officeArea', 'start'),
+    operationCommand('office.officeArea', 'landmarkPoint', 'select', { index: 0 }),
+    operationCommand('office.officeArea', 'landmarkPoint', 'select', { index: 1 })
+  ]), cancel: Object.freeze([capability('office.officeArea', 'cancel')]) })
+  ,Object.freeze({ name: '会议室异常占用', start: Object.freeze([
+    theme('办公会议'), capability('office.meetingRoomSituation', 'start')
+  ]), cancel: Object.freeze([capability('office.meetingRoomSituation', 'cancel')]) })
+  ,Object.freeze({ name: '会议室智能空间运营报告', start: Object.freeze([
+    theme('办公会议'), capability('office.csiMeetingRoomMonthlyReportAlert', 'start')
+  ]), cancel: Object.freeze([capability('office.csiMeetingRoomMonthlyReportAlert', 'cancel')]) })
+  ,Object.freeze({ name: '网络健康度', start: Object.freeze([
+    theme('网络体验'), capability('network.health', 'start')
+  ]), cancel: Object.freeze([capability('network.health', 'cancel')]) })
+  ,Object.freeze({ name: 'AI Agent攻击处置报告', start: Object.freeze([
+    theme('网络体验'), capability('network.aiAgentAttackAlert', 'start')
+  ]), cancel: Object.freeze([capability('network.aiAgentAttackAlert', 'cancel')]) })
 ]);
+
+const operation = (action, params) => Object.freeze({
+  action,
+  businessName: action,
+  command: 'operation',
+  commands: Object.freeze([command('executeOperation', params)])
+});
+
+// 事件卡片的人工二级按钮。这里仅做固定语义到前端 operation 的转换，不复制业务实现。
+const HC_OPERATION_REGISTRY = Object.freeze([
+  operation('查看未佩戴安全帽视频', { capability: 'security.noHardHatAlert', operation: 'video', command: 'open' }),
+  operation('呼叫119', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }),
+  operation('一键开门', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'open' }),
+  operation('一键关门', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'close' }),
+  operation('通知应急小组', { capability: 'security.fireAlarmAlert', operation: 'emergencyTeam', command: 'notify' }),
+  operation('短信通知员工', { capability: 'security.fireAlarmAlert', operation: 'smsNotification', command: 'notify', radius: 100 }),
+  operation('查看资产非法外出轨迹', { capability: 'asset.illegalOutingAlert', operation: 'track', command: 'show' }),
+  operation('查看资产非法外出视频', { capability: 'asset.illegalOutingAlert', operation: 'video', command: 'show' }),
+  operation('查看资产盘点异常轨迹', { capability: 'asset.assetInventory', operation: 'trajectory', command: 'toggle' }),
+  operation('远程诊断', { capability: 'facility.equipmentInspectionAlert', operation: 'remoteDiagnosis', command: 'open' }),
+  operation('发送会议邀请', { capability: 'facility.equipmentInspectionAlert', operation: 'meeting', command: 'invite' }),
+  operation('下发设备巡检工单', { capability: 'facility.equipmentInspectionAlert', operation: 'workOrder', command: 'dispatch' }),
+  operation('选择VIP会议室', { capability: 'office.harmonyMeetingRoom', operation: 'meetingRoom', command: 'select', roomId: 'meeting-room1' }),
+  operation('下发Wi-Fi防偷拍工单', { capability: 'office.wifiAntiSpyAlert', operation: 'workOrder', command: 'dispatch' }),
+  operation('一键处置VIP客户网络异常', { capability: 'network.vipCustomerNetworkAlert', operation: 'disposal', command: 'execute', userId: 'VIP12-exception' }),
+  operation('演示AI节能助手', { capability: 'energy.aiEnergyAssistant', operation: 'deviceStatusSliders', command: 'demonstrate' }),
+  operation('处置会议室异常占用', { capability: 'office.meetingRoomSituation', operation: 'disposal', command: 'execute' })
+]);
+
+const HC_PARAMETERIZED_REGISTRY = Object.freeze({
+  '切换语言': Object.freeze({
+    businessName: '切换语言',
+    command: 'set',
+    validateParams: (params) => params && Object.keys(params).length === 1 &&
+      ['zh-CN', 'en-US'].includes(params.language),
+    translate: (params) => [command('executeCapability', {
+      capability: 'global.language', command: 'set', language: params.language
+    })]
+  })
+});
 
 const createCommandRegistry = (businessRegistry) => {
   const registry = Object.create(null);
@@ -113,7 +268,16 @@ const createCommandRegistry = (businessRegistry) => {
   return Object.freeze(registry);
 };
 
-const HC_COMMAND_REGISTRY = createCommandRegistry(HC_BUSINESS_REGISTRY);
+const HC_COMMAND_REGISTRY = Object.freeze({
+  ...createCommandRegistry(HC_BUSINESS_REGISTRY),
+  ...Object.fromEntries(HC_OPERATION_REGISTRY.map((definition) => [definition.action, definition])),
+  '复位视角': Object.freeze({
+    businessName: '复位视角',
+    command: 'start',
+    commands: Object.freeze([capability('global.cameraReset', 'start')])
+  }),
+  ...HC_PARAMETERIZED_REGISTRY
+});
 const cloneCommands = (commands) => commands.map((item) => ({ action: item.action, params: { ...item.params } }));
 
 function getHcCommandDefinition(action) {
@@ -123,7 +287,15 @@ function getHcCommandDefinition(action) {
 function translateHcCommand(commandValue) {
   const definition = getHcCommandDefinition(commandValue.action);
   if (!definition) throw new Error(`unregistered HC action: ${commandValue.action}`);
+  if (typeof definition.translate === 'function') return definition.translate(commandValue.params);
   return cloneCommands(definition.commands);
 }
 
-module.exports = { HC_BUSINESS_REGISTRY, HC_COMMAND_REGISTRY, createCommandRegistry, getHcCommandDefinition, translateHcCommand };
+module.exports = {
+  HC_BUSINESS_REGISTRY,
+  HC_OPERATION_REGISTRY,
+  HC_COMMAND_REGISTRY,
+  createCommandRegistry,
+  getHcCommandDefinition,
+  translateHcCommand
+};

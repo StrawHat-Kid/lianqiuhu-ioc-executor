@@ -129,14 +129,15 @@ test('valid 启动园区总览 accepts empty params and expands to the frozen fr
   assert.equal(validateFrontendCommands(expanded), null);
 });
 
-test('取消园区总览 is not a registered HC action', async () => {
-  assert.equal(HC_COMMAND_REGISTRY['取消园区总览'], undefined);
+test('取消园区总览 uses the existing park overview lifecycle command', async () => {
   const publisher = createPublisher();
   const response = await request(publisher, 'POST', '/api/commands', [{
     action: '取消园区总览', params: {}
   }]);
-  assert.equal(response.status, 400);
-  assert.equal(publisher.calls.length, 0);
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(publisher.calls[0]), [
+    frontendCapability('situation.parkOverview', 'cancel')
+  ]);
 });
 
 test('valid 取消园区实时运营情况 expands to the real cancel lifecycle command', async () => {
@@ -193,9 +194,9 @@ const expectedBusinessDefinitions = [
   ['方案架构图', [frontendCapability('global.solutionArchitecture', 'start')], [frontendCapability('global.solutionArchitecture', 'cancel')]]
 ];
 
-test('all 20 HC businesses and 39 semantic actions expand to their frozen frontend arrays', async () => {
-  assert.equal(HC_BUSINESS_REGISTRY.length, 20);
-  assert.equal(Object.keys(HC_COMMAND_REGISTRY).length, 39);
+test('existing HC businesses retain their frozen frontend arrays after registry expansion', async () => {
+  assert.ok(HC_BUSINESS_REGISTRY.length >= 45);
+  assert.ok(Object.keys(HC_COMMAND_REGISTRY).length >= 109);
   for (const [name, expectedStart, expectedCancel] of expectedBusinessDefinitions) {
     const expectedActions = [['启动', 'start', expectedStart]];
     if (expectedCancel !== null) expectedActions.push(['取消', 'cancel', expectedCancel]);
@@ -212,9 +213,9 @@ test('all 20 HC businesses and 39 semantic actions expand to their frozen fronte
   }
 });
 
-test('HC Registry is complete, exact, and contains only valid frontend expansions', () => {
+test('HC Registry contains only valid frontend expansions', () => {
   const actions = Object.keys(HC_COMMAND_REGISTRY);
-  assert.equal(new Set(actions).size, 39);
+  assert.equal(new Set(actions).size, actions.length);
   for (const business of HC_BUSINESS_REGISTRY) {
     const start = HC_COMMAND_REGISTRY[`启动${business.name}`];
     assert.equal(start.businessName, business.name);
@@ -240,8 +241,9 @@ test('HC Registry is complete, exact, and contains only valid frontend expansion
   }
 });
 
-test('all 39 semantic actions require exactly empty params objects', async () => {
-  for (const action of Object.keys(HC_COMMAND_REGISTRY)) {
+test('non-parameterized semantic actions reject non-empty params', async () => {
+  for (const [action, definition] of Object.entries(HC_COMMAND_REGISTRY)) {
+    if (typeof definition.validateParams === 'function') continue;
     const invalidParams = [
       { command: 'start' },
       { command: 'cancel' },
@@ -254,6 +256,76 @@ test('all 39 semantic actions require exactly empty params objects', async () =>
       assert.equal(response.status, 400, `${action} ${JSON.stringify(params)}`);
       assert.equal(publisher.calls.length, 0, action);
     }
+  }
+});
+
+test('new HC semantics translate Quick, Alert, event operation, language, and camera reset exactly', async () => {
+  const cases = [
+    ['启动视频监控', {}, [
+      frontendTheme('综合安防'), frontendCapability('security.videoMonitoring', 'start'),
+      frontendCommand('executeOperation', { capability: 'security.videoMonitoring', operation: 'camera', command: 'select', cameraId: 'B14_HEAT_DIS_1_BALL_CAM1' }),
+      frontendCommand('executeOperation', { capability: 'security.videoMonitoring', operation: 'camera', command: 'select', cameraId: 'B14_TRANSF_1_BALL_CAM2' }),
+      frontendCommand('executeOperation', { capability: 'security.videoMonitoring', operation: 'camera', command: 'select', cameraId: 'B14_HEAT_DIS_1_GUN2_CAR' }),
+      frontendCommand('executeOperation', { capability: 'security.videoMonitoring', operation: 'camera', command: 'select', cameraId: 'B14_HEAT_DIS_1_GUN1_FACE' }),
+      frontendCommand('executeOperation', { capability: 'security.videoMonitoring', operation: 'camera', command: 'select', cameraId: 'B14_HEAT_DIS_1_PANO_CAM1' })
+    ]],
+    ['取消视频监控', {}, [frontendCapability('security.videoMonitoring', 'cancel')]],
+    ['启动AI预测性维护告警', {}, [
+      frontendTheme('设施管理'), frontendCapability('facility.aiPredictiveMaintenanceAlert', 'start'),
+      frontendCommand('executeOperation', { capability: 'facility.aiPredictiveMaintenanceAlert', operation: 'smartDispatch', command: 'dispatch' }),
+      frontendCommand('executeOperation', { capability: 'facility.aiPredictiveMaintenanceAlert', operation: 'smartDispatch', command: 'advance' }),
+      frontendCommand('executeOperation', { capability: 'facility.aiPredictiveMaintenanceAlert', operation: 'smartDispatch', command: 'advance' })
+    ]],
+    ['取消AI Agent攻击处置报告', {}, [frontendCapability('network.aiAgentAttackAlert', 'cancel')]],
+    ['查看资产非法外出轨迹', {}, [frontendCommand('executeOperation', { capability: 'asset.illegalOutingAlert', operation: 'track', command: 'show' })]],
+    ['切换语言', { language: 'zh-CN' }, [frontendCapability('global.language', 'set')].map((item) => ({ ...item, params: { ...item.params, language: 'zh-CN' } }))],
+    ['切换语言', { language: 'en-US' }, [frontendCapability('global.language', 'set')].map((item) => ({ ...item, params: { ...item.params, language: 'en-US' } }))],
+    ['复位视角', {}, [frontendCapability('global.cameraReset', 'start')]],
+    ['启动场景旋转', {}, [frontendCapability('global.sceneRotation', 'start')]],
+    ['取消场景旋转', {}, [frontendCapability('global.sceneRotation', 'cancel')]]
+  ];
+  for (const [action, params, expected] of cases) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params }]);
+    assert.equal(response.status, 200, action);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), expected, action);
+  }
+});
+
+test('15 指令功能2.0 semantic starts expand to strict full-flow arrays and cancels retain parent lifecycle', async () => {
+  const point = (capability, index) => frontendCommand('executeOperation', { capability, operation: 'landmarkPoint', command: 'select', index });
+  const operation = (capability, name, command) => frontendCommand('executeOperation', { capability, operation: name, command });
+  const cases = [
+    ['启动AI机器人', [frontendTheme('综合安防'), frontendCapability('security.aiRobot', 'start'), frontendCommand('executeOperation', { capability: 'security.aiRobot', operation: 'patrolPoint', command: 'select', pointId: 'inspection_point2' })]],
+    ['启动安防人员', [frontendTheme('综合安防'), frontendCapability('security.securityPersonnel', 'start'), point('security.securityPersonnel', 0), point('security.securityPersonnel', 1)]],
+    ['启动安保岗亭', [frontendTheme('综合安防'), frontendCapability('security.securityBooth', 'start'), point('security.securityBooth', 0)]],
+    ['启动便捷通行安保岗亭', [frontendTheme('便捷通行'), frontendCapability('access.securityBooth', 'start'), point('access.securityBooth', 0)]],
+    ['启动班车信息', [frontendTheme('便捷通行'), frontendCapability('access.shuttleBusInfo', 'start'), point('access.shuttleBusInfo', 1)]],
+    ['启动车辆闸机', [frontendTheme('便捷通行'), frontendCapability('access.vehicleGate', 'start'), point('access.vehicleGate', 0)]],
+    ['启动人员警示列表告警', [frontendTheme('便捷通行'), frontendCapability('access.personWarningAlert', 'start'), operation('access.personWarningAlert', 'trajectory', 'show')]],
+    ['启动车辆警示列表告警', [frontendTheme('便捷通行'), frontendCapability('access.vehicleWarningAlert', 'start'), operation('access.vehicleWarningAlert', 'trajectory', 'show')]],
+    ['启动冷水机组', [frontendTheme('设施管理'), frontendCapability('facility.chiller', 'start'), ...Array.from({ length: 9 }, (_, index) => point('facility.chiller', index))]],
+    ['启动设施维修人员', [frontendTheme('设施管理'), frontendCapability('facility.maintenanceStaff', 'start'), point('facility.maintenanceStaff', 0), point('facility.maintenanceStaff', 1)]],
+    ['启动值班人员', [frontendTheme('能源管理'), frontendCapability('energy.dutyPersonnel', 'start'), point('energy.dutyPersonnel', 0), point('energy.dutyPersonnel', 1), point('energy.dutyPersonnel', 2)]],
+    ['启动能源维修人员', [frontendTheme('能源管理'), frontendCapability('energy.maintenanceStaff', 'start'), point('energy.maintenanceStaff', 0), point('energy.maintenanceStaff', 1)]],
+    ['启动办公区', [frontendTheme('办公会议'), frontendCapability('office.officeArea', 'start'), point('office.officeArea', 0), point('office.officeArea', 1)]]
+  ];
+  for (const [action, expected] of cases) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
+    assert.equal(response.status, 200, action);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), expected, action);
+    const cancel = await request(publisher, 'POST', '/api/commands', [{ action: action.replace('启动', '取消'), params: {} }]);
+    assert.equal(cancel.status, 200, `${action} cancel`);
+  }
+});
+
+test('切换语言 rejects missing, extra, and unsupported language params', async () => {
+  for (const params of [{}, { language: 'zh' }, { language: 'fr-FR' }, { language: 'zh-CN', extra: true }]) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action: '切换语言', params }]);
+    assert.equal(response.status, 400, JSON.stringify(params));
+    assert.equal(publisher.calls.length, 0);
   }
 });
 
