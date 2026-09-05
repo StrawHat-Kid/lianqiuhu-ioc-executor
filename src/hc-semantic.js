@@ -16,6 +16,12 @@ function validateHcSemanticCommands(commands) {
     if (!Object.prototype.hasOwnProperty.call(item, 'params')) {
       return `HC command at index ${index} params is required`;
     }
+    if (typeof definition.validateParams === 'function') {
+      if (!definition.validateParams(item.params)) {
+        return `HC command at index ${index} params is invalid`;
+      }
+      continue;
+    }
     if (Object.keys(item.params).length !== 0) {
       return `HC command at index ${index} params must be empty`;
     }
