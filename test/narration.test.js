@@ -455,7 +455,7 @@ test('park realtime Narration 2.0 sends two callbacks: Steps1-4 combined, then S
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
   const expectedBodies = [realtimeZhTexts.slice(0, 4).join(''), realtimeZhTexts[4]];
-  const expectedWaits = [35000, 17000 + 2000];
+  const expectedWaits = [33000, 17000 + 2000];
   for (let index = 1; index <= 2; index += 1) {
     await eventually(() => clock.calls.length === index && callback.calls.length === index);
     assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
@@ -488,7 +488,7 @@ test('park realtime narration keeps the calibrated first-return wait unscaled wh
   const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), [realtimeEnTexts.slice(0, 4).join(''), realtimeEnTexts[4]]);
-  assert.deepEqual(durations, [12000, 38000, 3700]);
+  assert.deepEqual(durations, [12000, 36000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
 });
 
@@ -604,7 +604,7 @@ test('security narration keeps the calibrated first-return wait unscaled while S
   const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), [securityEnTexts.slice(0, 4).join(''), securityEnTexts[4]]);
-  assert.deepEqual(durations, [12000, 30000, 3700]);
+  assert.deepEqual(durations, [12000, 28000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, SECURITY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -726,7 +726,7 @@ test('energy narration keeps the calibrated first-return wait unscaled while Ste
   const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), [energyEnTexts.slice(0, 4).join(''), energyEnTexts[4]]);
-  assert.deepEqual(durations, [12000, 48000, 3700]);
+  assert.deepEqual(durations, [12000, 46000, 3700]);
   assert.deepEqual(executor.calls.at(-1).commands, ENERGY_REALTIME_NARRATION.completeCommands);
 });
 
@@ -809,14 +809,14 @@ test('energy HTTP mock E2E returns 202 then publishes two callbacks and only Ste
 
 test('Narration 2.0 first-return calibrated waits use canonical languages and normalized aliases without changing Step5', async () => {
   const cases = [
-    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'zh-CN', 35000, 19000],
-    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'en-US', 38000, 19000],
-    [SECURITY_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION_ACTION, 'zh-CN', 25000, 18500],
-    [SECURITY_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION_ACTION, 'en-US', 30000, 19000],
-    [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'zh-CN', 46000, 18000],
-    [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'en-US', 48000, 19000],
-    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'zh', 35000, 19000],
-    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'en', 38000, 19000]
+    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'zh-CN', 33000, 19000],
+    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'en-US', 36000, 19000],
+    [SECURITY_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION_ACTION, 'zh-CN', 23000, 18500],
+    [SECURITY_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION_ACTION, 'en-US', 28000, 19000],
+    [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'zh-CN', 44000, 18000],
+    [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'en-US', 46000, 19000],
+    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'zh', 33000, 19000],
+    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'en', 36000, 19000]
   ];
 
   for (const [definition, action, requestedLanguage, firstWaitMs, step5WaitMs] of cases) {
@@ -1167,9 +1167,9 @@ test('minimumIocHoldMs remains unscaled and postGapMs is added after the protect
 
 test('all production narration definitions freeze calibrated group delays, durations, startup buffers, post gaps, prepare commands, and intros', () => {
   const definitions = [
-    [PARK_REALTIME_NARRATION, '综合态势', { 'zh-CN': 35000, 'en-US': 38000 }, [14000, 5000, 7500, 9500, 17000], [11000, 7000, 11500, 10000, 17000], [7000, 4000, 7000, 7000, 0], [1500, 1000, 1500, 1000, 2000]],
-    [SECURITY_REALTIME_NARRATION, '综合安防', { 'zh-CN': 25000, 'en-US': 30000 }, [12000, 5000, 5000, 10000, 16500], [11000, 6000, 6000, 11000, 17000], [4000, 7000, 6000, 4000, 0], [1500, 1000, 1000, 1500, 2000]],
-    [ENERGY_REALTIME_NARRATION, '能源管理', { 'zh-CN': 46000, 'en-US': 48000 }, [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [3000, 4000, 7000, 7000, 0], [3000, 1000, 1000, 1000, 2000]]
+    [PARK_REALTIME_NARRATION, '综合态势', { 'zh-CN': 33000, 'en-US': 36000 }, [14000, 5000, 7500, 9500, 17000], [11000, 7000, 11500, 10000, 17000], [7000, 4000, 7000, 7000, 0], [1500, 1000, 1500, 1000, 2000]],
+    [SECURITY_REALTIME_NARRATION, '综合安防', { 'zh-CN': 23000, 'en-US': 28000 }, [12000, 5000, 5000, 10000, 16500], [11000, 6000, 6000, 11000, 17000], [4000, 7000, 6000, 4000, 0], [1500, 1000, 1000, 1500, 2000]],
+    [ENERGY_REALTIME_NARRATION, '能源管理', { 'zh-CN': 44000, 'en-US': 46000 }, [27000, 7000, 7000, 8500, 16000], [31500, 9000, 7000, 10000, 17000], [3000, 4000, 7000, 7000, 0], [3000, 1000, 1000, 1000, 2000]]
   ];
   for (const [definition, theme, returnGroupDelayMs, zhDurations, enDurations, startupBuffers, postGaps] of definitions) {
     assert.equal(definition.introDelayMs, 12000);
