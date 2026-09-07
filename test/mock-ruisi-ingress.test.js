@@ -89,7 +89,7 @@ test('a real mock 401 still allows narration cleanup to run', async () => {
     assert.equal(started.ok, true);
     await started.session.runPromise;
     assert.deepEqual(calls, [
-      PARK_BASE_OVERVIEW.prepareCommands,
+      PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN'],
       PARK_BASE_OVERVIEW.startCommands,
       PARK_BASE_OVERVIEW.completeCommands
     ]);

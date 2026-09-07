@@ -143,7 +143,7 @@ test('park base overview zh narration publishes start, callbacks fixed text, wai
   await eventually(() => clock.calls.length === 1);
   assert.equal(started.session.state, 'running');
   assert.equal(executor.calls.length, 2);
-  assert.deepEqual(executor.calls[0].commands, PARK_BASE_OVERVIEW.prepareCommands);
+  assert.deepEqual(executor.calls[0].commands, PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
   assert.deepEqual(executor.calls[1].commands, PARK_BASE_OVERVIEW.startCommands);
   assert.equal(callback.calls[0].options.body, zhText);
   assert.equal(clock.calls[0].ms, 30000);
@@ -164,8 +164,45 @@ test('English narration and language normalization use the frozen English answer
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: async () => {} });
   const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: parsed.language });
   await started.session.runPromise;
+  assert.deepEqual(executor.calls[0].commands, PARK_BASE_OVERVIEW.prepareCommandsByLanguage['en-US']);
   assert.equal(callback.calls[0].options.body, enText);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['en-US'].durationMs, 22000);
+});
+
+test('park base overview language aliases explicitly synchronize IOC language before its existing prepare command', async () => {
+  const cases = [
+    ['zh', 'zh-CN'],
+    ['zh-CN', 'zh-CN'],
+    ['en', 'en-US'],
+    ['en-US', 'en-US']
+  ];
+
+  for (const [inputLanguage, expectedLanguage] of cases) {
+    const parsed = validateNarrationCommand({ action: PARK_BASE_OVERVIEW_ACTION, params: { language: inputLanguage } });
+    const executor = commandExecutor();
+    const callback = callbackClient();
+    const clock = manualWait();
+    const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
+    const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: parsed.language });
+
+    await eventually(() => callback.calls.length === 1 && clock.calls.length === 1);
+    assert.deepEqual(executor.calls[0].commands, [
+      {
+        action: 'executeCapability',
+        params: {
+          capability: 'global.language',
+          command: 'set',
+          language: expectedLanguage
+        }
+      },
+      ...PARK_BASE_OVERVIEW.prepareCommands
+    ]);
+    assert.deepEqual(executor.calls[1].commands, PARK_BASE_OVERVIEW.startCommands);
+    assert.equal(callback.calls.length, 1);
+
+    clock.calls[0].resolve();
+    await started.session.runPromise;
+  }
 });
 
 test('park base overview keeps the UE roam floor independent of speech scale, while longer speech still wins', async () => {
@@ -337,7 +374,7 @@ test('HTTP narration is accepted immediately and full mock callback E2E follows 
     assert.equal(response.status, 202);
     assert.equal(body.ok, true);
     await eventually(() => publisher.calls.length === 2 && callbackMessages.length === 1 && clock.calls.length === 1);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
     assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_BASE_OVERVIEW.startCommands);
     assert.deepEqual(callbackMessages[0], { agent: 'e2e-agent', to: 'e2e-user@example.com', body: zhText, groupchat: false });
     assert.equal(publisher.calls.length, 2, 'HTTP returned before the narration duration elapsed');
@@ -396,7 +433,7 @@ test('real fetch ECONNREFUSED still returns HTTP 202, waits, and publishes narra
     });
     assert.equal(response.status, 202);
     await eventually(() => clock.calls.length === 1);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
     assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_BASE_OVERVIEW.startCommands);
     clock.calls[0].resolve();
     await eventually(() => publisher.calls.length === 3);
@@ -461,7 +498,7 @@ test('park realtime Narration 2.0 sends two callbacks: Steps1-4 combined, then S
     assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
     assert.equal(clock.calls[index - 1].ms, expectedWaits[index - 1]);
     if (index === 1) {
-      assert.deepEqual(executor.calls[0].commands, PARK_REALTIME_NARRATION.prepareCommands);
+      assert.deepEqual(executor.calls[0].commands, PARK_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
       assert.deepEqual(executor.calls[1].commands, PARK_REALTIME_NARRATION.startCommands);
       assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-1')), false);
     } else {
@@ -553,7 +590,7 @@ test('HTTP mock E2E sends two park realtime callbacks and only the Step5 MQTT se
       clock.calls[index - 1].resolve();
     }
     await eventually(() => publisher.calls.length === 4);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_REALTIME_NARRATION.prepareCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
     assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_REALTIME_NARRATION.startCommands);
     assert.deepEqual(JSON.parse(publisher.calls[3]), PARK_REALTIME_NARRATION.completeCommands);
   } finally {
@@ -574,7 +611,7 @@ test('security Narration 2.0 sends two frozen Chinese returns and never mixes no
     await eventually(() => clock.calls.length === index && callback.calls.length === index);
     assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
     if (index === 1) {
-      assert.deepEqual(executor.calls[0].commands, SECURITY_REALTIME_NARRATION.prepareCommands);
+      assert.deepEqual(executor.calls[0].commands, SECURITY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
       assert.deepEqual(executor.calls[1].commands, SECURITY_REALTIME_NARRATION.startCommands);
       assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-1')), false);
     } else {
@@ -675,7 +712,7 @@ test('security HTTP mock E2E returns 202 then publishes two callbacks and only S
       clock.calls[index - 1].resolve();
     }
     await eventually(() => publisher.calls.length === 4);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), SECURITY_REALTIME_NARRATION.prepareCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), SECURITY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
     assert.deepEqual(JSON.parse(publisher.calls[1]), SECURITY_REALTIME_NARRATION.startCommands);
     assert.deepEqual(JSON.parse(publisher.calls[3]), SECURITY_REALTIME_NARRATION.completeCommands);
     assert.doesNotMatch(publisher.calls.join('\n'), /security\.noHardHatAlert|noHardHatFullFlow|video\/open/);
@@ -697,7 +734,7 @@ test('energy Narration 2.0 sends two frozen Chinese returns and never mixes othe
     await eventually(() => clock.calls.length === index && callback.calls.length === index);
     assert.equal(callback.calls[index - 1].options.body, expectedBodies[index - 1]);
     if (index === 1) {
-      assert.deepEqual(executor.calls[0].commands, ENERGY_REALTIME_NARRATION.prepareCommands);
+      assert.deepEqual(executor.calls[0].commands, ENERGY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
       assert.deepEqual(executor.calls[1].commands, ENERGY_REALTIME_NARRATION.startCommands);
       assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-1')), false);
     } else {
@@ -797,7 +834,7 @@ test('energy HTTP mock E2E returns 202 then publishes two callbacks and only Ste
       clock.calls[index - 1].resolve();
     }
     await eventually(() => publisher.calls.length === 4);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), ENERGY_REALTIME_NARRATION.prepareCommands);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), ENERGY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
     assert.deepEqual(JSON.parse(publisher.calls[1]), ENERGY_REALTIME_NARRATION.startCommands);
     assert.deepEqual(JSON.parse(publisher.calls[3]), ENERGY_REALTIME_NARRATION.completeCommands);
     assert.doesNotMatch(publisher.calls.join('\n'), ENERGY_FORBIDDEN_COMMANDS);
@@ -816,7 +853,11 @@ test('Narration 2.0 first-return calibrated waits use canonical languages and no
     [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'zh-CN', 44000, 18000],
     [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'en-US', 46000, 19000],
     [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'zh', 33000, 19000],
-    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'en', 36000, 19000]
+    [PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION, 'en', 36000, 19000],
+    [SECURITY_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION_ACTION, 'zh', 23000, 18500],
+    [SECURITY_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION_ACTION, 'en', 28000, 19000],
+    [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'zh', 44000, 18000],
+    [ENERGY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION_ACTION, 'en', 46000, 19000]
   ];
 
   for (const [definition, action, requestedLanguage, firstWaitMs, step5WaitMs] of cases) {
@@ -828,6 +869,7 @@ test('Narration 2.0 first-return calibrated waits use canonical languages and no
     const started = manager.startNarration({ definition, context: context(), language });
 
     await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
+    assert.deepEqual(executor.calls[0].commands, definition.prepareCommandsByLanguage[language]);
     assert.equal(clock.calls[0].ms, firstWaitMs, `${definition.scenario} ${requestedLanguage} first return wait`);
     assert.equal(callback.calls[0].options.segmentIndex, 1);
     assert.equal(executor.calls.some((call) => call.meta.source.endsWith(':segment-2')), false);
@@ -1174,6 +1216,14 @@ test('all production narration definitions freeze calibrated group delays, durat
   for (const [definition, theme, returnGroupDelayMs, zhDurations, enDurations, startupBuffers, postGaps] of definitions) {
     assert.equal(definition.introDelayMs, 12000);
     assert.deepEqual(definition.returnGroupDelayMs, returnGroupDelayMs);
+    assert.deepEqual(definition.prepareCommandsByLanguage['zh-CN'][0], {
+      action: 'executeCapability', params: { capability: 'global.language', command: 'set', language: 'zh-CN' }
+    });
+    assert.deepEqual(definition.prepareCommandsByLanguage['en-US'][0], {
+      action: 'executeCapability', params: { capability: 'global.language', command: 'set', language: 'en-US' }
+    });
+    assert.deepEqual(definition.prepareCommandsByLanguage['zh-CN'][1], definition.prepareCommands[0]);
+    assert.deepEqual(definition.prepareCommandsByLanguage['en-US'][1], definition.prepareCommands[0]);
     assert.deepEqual(definition.prepareCommands, [{ action: '主题切换', params: { '主题名称': theme } }]);
     assert.equal(definition.startCommands.some((item) => item.action === '主题切换'), false);
     assert.deepEqual(definition.segments.map((item) => item.content['zh-CN'].durationMs), zhDurations);
@@ -1186,6 +1236,28 @@ test('all production narration definitions freeze calibrated group delays, durat
     );
   }
   assert.equal(PARK_BASE_OVERVIEW.introDelayMs, 12000);
+  assert.deepEqual(PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN'], [
+    {
+      action: 'executeCapability',
+      params: {
+        capability: 'global.language',
+        command: 'set',
+        language: 'zh-CN'
+      }
+    },
+    ...PARK_BASE_OVERVIEW.prepareCommands
+  ]);
+  assert.deepEqual(PARK_BASE_OVERVIEW.prepareCommandsByLanguage['en-US'], [
+    {
+      action: 'executeCapability',
+      params: {
+        capability: 'global.language',
+        command: 'set',
+        language: 'en-US'
+      }
+    },
+    ...PARK_BASE_OVERVIEW.prepareCommands
+  ]);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['zh-CN'].durationMs, 20000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['en-US'].durationMs, 22000);
   assert.equal(PARK_BASE_OVERVIEW.segments[0].ttsStartupBufferMs || 0, 0);

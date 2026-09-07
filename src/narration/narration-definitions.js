@@ -5,6 +5,13 @@ const ENERGY_REALTIME_NARRATION_ACTION = '讲解能源与能效实时态势';
 
 const command = (action, params) => Object.freeze({ action, params: Object.freeze({ ...params }) });
 const capability = (name, commandName) => command('executeCapability', { capability: name, command: commandName });
+const languageCapability = (language) => command('executeCapability', {
+  capability: 'global.language', command: 'set', language
+});
+const narrationPrepareCommands = (theme) => Object.freeze({
+  'zh-CN': Object.freeze([languageCapability('zh-CN'), command('主题切换', { '主题名称': theme })]),
+  'en-US': Object.freeze([languageCapability('en-US'), command('主题切换', { '主题名称': theme })])
+});
 const presentationStep = (index) => command('executeOperation', {
   capability: 'situation.parkRealtimeNarration', operation: 'presentation', command: 'select', index
 });
@@ -29,6 +36,7 @@ const segment = (index, commands, zhText, zhDurationMs, enText, enDurationMs, { 
 const PARK_BASE_OVERVIEW = Object.freeze({
   scenario: 'parkBaseOverview',
   action: PARK_BASE_OVERVIEW_ACTION,
+  prepareCommandsByLanguage: narrationPrepareCommands('综合态势'),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合态势' })
   ]),
@@ -61,6 +69,7 @@ const PARK_REALTIME_NARRATION = Object.freeze({
   returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
   // 第一回程下发后到第二回程的现场标定等待；语言别名会在入参校验时归一化。
   returnGroupDelayMs: Object.freeze({ 'zh-CN': 33000, 'en-US': 36000 }),
+  prepareCommandsByLanguage: narrationPrepareCommands('综合态势'),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合态势' })
   ]),
@@ -127,6 +136,7 @@ const SECURITY_REALTIME_NARRATION = Object.freeze({
   returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
   // 第一回程下发后到第二回程的现场标定等待；语言别名会在入参校验时归一化。
   returnGroupDelayMs: Object.freeze({ 'zh-CN': 23000, 'en-US': 28000 }),
+  prepareCommandsByLanguage: narrationPrepareCommands('综合安防'),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '综合安防' })
   ]),
@@ -193,6 +203,7 @@ const ENERGY_REALTIME_NARRATION = Object.freeze({
   returnGroups: Object.freeze([Object.freeze([1, 2, 3, 4]), Object.freeze([5])]),
   // 第一回程下发后到第二回程的现场标定等待；语言别名会在入参校验时归一化。
   returnGroupDelayMs: Object.freeze({ 'zh-CN': 44000, 'en-US': 46000 }),
+  prepareCommandsByLanguage: narrationPrepareCommands('能源管理'),
   prepareCommands: Object.freeze([
     command('主题切换', { '主题名称': '能源管理' })
   ]),
