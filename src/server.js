@@ -9,6 +9,7 @@ const { createCommandExecutor } = require('./command-executor');
 const { createRuisiCallbackClient } = require('./ruisi-callback-client');
 const { createNarrationSessionManager } = require('./narration/narration-session-manager');
 const { isNarrationRequest, validateNarrationCommand } = require('./narration/narration-definitions');
+const { isDynamicQaRequest, validateDynamicQaCommand, createDynamicQaHandler } = require('./dynamic-qa/dynamic-qa-handler');
 
 function requestBodyType(body) {
   if (Array.isArray(body)) return '旧数组模式';
@@ -28,12 +29,13 @@ function contextSummary(context) {
   };
 }
 
-function rejectionReason(error, { bodyType, narration = false } = {}) {
+function rejectionReason(error, { bodyType, narration = false, dynamicQa = false } = {}) {
   const value = String(error || '未知错误');
   if (value.includes('missing context.callback')) return 'context.callback缺失，无法建立RUISI回程通道';
   if (value.includes('missing context.agent')) return 'context.agent缺失，无法建立RUISI回程通道';
   if (value.includes('missing context.replyTo')) return 'context.reply_to缺失，无法建立RUISI回程通道';
   if (value.includes('missing context')) {
+    if (dynamicQa) return `动态问答必须携带context上下文，当前收到${bodyType || '未知模式'}`;
     return `讲解类指令必须携带context上下文，当前收到${bodyType || '未知模式'}`;
   }
   if (value.includes('language must be one of')) return `params.language不支持，${value}`;
@@ -45,14 +47,19 @@ function rejectionReason(error, { bodyType, narration = false } = {}) {
   if (value.includes('context callback')) return `context.callback校验失败：${value}`;
   if (value.includes('context agent')) return `context.agent校验失败：${value}`;
   if (value.includes('context reply_to')) return `context.reply_to校验失败：${value}`;
+  if (dynamicQa) return `动态问答指令校验失败：${value}`;
   if (narration) return `讲解指令校验失败：${value}`;
   return `指令校验失败：${value}`;
 }
 
-function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager } = {}) {
+function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler } = {}) {
   const executor = commandExecutor || createCommandExecutor({ publisher, logger, mqttTopic });
+  const sharedCallbackClient = callbackClient || createRuisiCallbackClient({ logger });
   const manager = narrationManager || createNarrationSessionManager({
-    commandExecutor: executor, callbackClient: createRuisiCallbackClient({ logger }), logger
+    commandExecutor: executor, callbackClient: sharedCallbackClient, logger
+  });
+  const qaHandler = dynamicQaHandler || createDynamicQaHandler({
+    commandExecutor: executor, callbackClient: sharedCallbackClient, logger
   });
   const app = express();
   app.use((req, res, next) => {
@@ -71,11 +78,11 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
   });
   app.use(express.json());
 
-  function reject(res, { requestId, error, bodyType, narration = false, stage = '请求校验' }) {
-    const reason = rejectionReason(error, { bodyType, narration });
+  function reject(res, { requestId, error, bodyType, narration = false, dynamicQa = false, stage = '请求校验', status = 400 }) {
+    const reason = rejectionReason(error, { bodyType, narration, dynamicQa });
     res.locals.rejectionReason = reason;
     logger.error(`[${stage}] 请求被拒绝：${reason}`, { requestId, bodyType, originalError: error });
-    return res.status(400).json({ ok: false, error });
+    return res.status(status).json({ ok: false, error });
   }
 
   app.get('/health', (req, res) => {
@@ -135,6 +142,30 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
       return res.status(202).json({ ok: true, message: 'narration accepted', sessionId: started.session.id });
     }
 
+    if (isDynamicQaRequest(receivedCommands)) {
+      if (receivedCommands.length !== 1) {
+        return reject(res, {
+          requestId: req.requestId, error: 'dynamic QA request must contain exactly one dynamic QA command',
+          bodyType, dynamicQa: true, stage: '动态问答校验'
+        });
+      }
+      const dynamicCommand = validateDynamicQaCommand(receivedCommands[0]);
+      if (dynamicCommand.error) {
+        return reject(res, { requestId: req.requestId, error: dynamicCommand.error, bodyType, dynamicQa: true, stage: '动态问答校验' });
+      }
+      logger.info('[语义转换] 指令识别为动态问答', {
+        requestId: req.requestId, action: dynamicCommand.value.action, language: dynamicCommand.value.language
+      });
+      const result = await qaHandler.execute({ command: dynamicCommand.value, context: request.context, requestId: req.requestId });
+      if (!result.ok) {
+        return reject(res, {
+          requestId: req.requestId, error: result.error, bodyType, dynamicQa: true,
+          stage: '动态问答执行', status: result.status || 400
+        });
+      }
+      return res.status(200).json({ ok: true, message: result.message });
+    }
+
     logger.info('[指令解析] 识别为普通IOC指令，无需RUISI回程', { requestId: req.requestId });
     const result = await executor.executeCommandRequest(receivedCommands, { requestId: req.requestId });
     if (!result.ok) {
@@ -174,7 +205,7 @@ function start() {
   const narrationManager = createNarrationSessionManager({
     commandExecutor, callbackClient, logger, durationScale: config.narrationDurationScale
   });
-  const app = createApp({ publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager });
+  const app = createApp({ publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager, callbackClient });
   const server = app.listen(config.port, () => {
     logger.info('[执行器] HTTP服务监听成功', { port: config.port });
   });
