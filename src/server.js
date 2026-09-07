@@ -52,14 +52,14 @@ function rejectionReason(error, { bodyType, narration = false, dynamicQa = false
   return `指令校验失败：${value}`;
 }
 
-function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler } = {}) {
+function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait } = {}) {
   const executor = commandExecutor || createCommandExecutor({ publisher, logger, mqttTopic });
   const sharedCallbackClient = callbackClient || createRuisiCallbackClient({ logger });
   const manager = narrationManager || createNarrationSessionManager({
     commandExecutor: executor, callbackClient: sharedCallbackClient, logger
   });
   const qaHandler = dynamicQaHandler || createDynamicQaHandler({
-    commandExecutor: executor, callbackClient: sharedCallbackClient, logger
+    commandExecutor: executor, callbackClient: sharedCallbackClient, logger, wait: dynamicQaWait
   });
   const app = express();
   app.use((req, res, next) => {
