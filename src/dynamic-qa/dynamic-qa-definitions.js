@@ -1,5 +1,15 @@
-const ENERGY_QUERY_ACTION = '查询用能管理';
-const WORK_ORDER_QUERY_ACTION = '查询工单处理统计';
+const DYNAMIC_QA_ACTION_DEFINITIONS = Object.freeze({
+  '查询累计用气量': Object.freeze({ kind: 'energy', metric: 'gas', parameter: 'day' }),
+  '查询累计用水量': Object.freeze({ kind: 'energy', metric: 'water', parameter: 'day' }),
+  '查询累计用电量': Object.freeze({ kind: 'energy', metric: 'electricity', parameter: 'day' }),
+  '查询节能达成率': Object.freeze({ kind: 'energy', metric: 'achievementRate', parameter: 'day' }),
+  '查询年度等效节能': Object.freeze({ kind: 'annualEquivalentEnergySaving' }),
+  '查询单日新增用能': Object.freeze({ kind: 'singleDayIncremental' }),
+  '查询处理中工单': Object.freeze({ kind: 'workOrder', status: 'processing', parameter: 'month' }),
+  '查询待处理工单': Object.freeze({ kind: 'workOrder', status: 'pending', parameter: 'month' }),
+  '查询已关闭工单': Object.freeze({ kind: 'workOrder', status: 'closed', parameter: 'month' }),
+  '查询工单处理情况': Object.freeze({ kind: 'workOrder', status: 'overview', parameter: 'month' })
+});
 
 const ENERGY_METRICS = Object.freeze({
   gas: Object.freeze({
@@ -49,6 +59,6 @@ function dynamicQaPrepareCommands(language) {
 }
 
 module.exports = {
-  ENERGY_QUERY_ACTION, WORK_ORDER_QUERY_ACTION, ENERGY_METRICS, ANNUAL_EQUIVALENT_ENERGY_SAVING,
+  DYNAMIC_QA_ACTION_DEFINITIONS, ENERGY_METRICS, ANNUAL_EQUIVALENT_ENERGY_SAVING,
   WORK_ORDER_DATA, WORK_ORDER_REFERENCE, MONTH_NAMES, dynamicQaPrepareCommands
 };
