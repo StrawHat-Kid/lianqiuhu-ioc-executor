@@ -113,6 +113,11 @@ function getReturnGroupWaitMs(definition, groupPosition, groupCount, language, f
     : fallbackDelayMs;
 }
 
+function getPrepareCommands(definition, language) {
+  const languageCommands = definition.prepareCommandsByLanguage?.[language];
+  return Array.isArray(languageCommands) ? languageCommands : definition.prepareCommands || [];
+}
+
 function createNarrationSessionManager({ commandExecutor, callbackClient, logger, durationScale = 1, wait = sleep } = {}) {
   if (!commandExecutor || typeof commandExecutor.publishFrontendCommands !== 'function') {
     throw new Error('narration command executor is required');
@@ -158,7 +163,7 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
       if (session.abortController.signal.aborted) return;
       session.state = 'running';
       logger.info('[讲解] 会话启动', sessionDetails(session, { language: session.language }));
-      const prepareCommands = session.definition.prepareCommands || [];
+      const prepareCommands = getPrepareCommands(session.definition, session.language);
       logger.info('[讲解] Narration prepareCommands 开始', sessionDetails(session, { commands: prepareCommands }));
       if (prepareCommands.length > 0) {
         const prepareResult = await commandExecutor.publishFrontendCommands(prepareCommands, {
@@ -327,5 +332,5 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
 
 module.exports = {
   createNarrationSessionManager, sleep, getEffectiveSegmentDurationMs, getSegmentDurationDetails,
-  getReturnGroups, getReturnGroupDurationDetails, getReturnGroupWaitMs
+  getReturnGroups, getReturnGroupDurationDetails, getReturnGroupWaitMs, getPrepareCommands
 };
