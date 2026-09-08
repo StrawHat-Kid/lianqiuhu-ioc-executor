@@ -9,11 +9,13 @@ const {
   DYNAMIC_QA_ACTIONS, normalizeDynamicQaLanguage, validateDynamicQaCommand, createDynamicQaHandler
 } = require('../src/dynamic-qa/dynamic-qa-handler');
 const { buildDynamicQaAnswer } = require('../src/dynamic-qa/dynamic-qa-answer-builder');
+const { getHcBusinessDate } = require('../src/hc-business-date');
 const {
   PARK_BASE_OVERVIEW, PARK_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION
 } = require('../src/narration/narration-definitions');
 
 function logger() { return { info() {}, warn() {}, error() {} }; }
+function fixedHcBusinessDate() { return { year: 2026, month: 9, day: 8 }; }
 function publisher() {
   const calls = [];
   return { calls, isConnected: () => true, publish: async (message) => calls.push(message) };
@@ -63,7 +65,8 @@ async function post(body, dependencies = {}) {
   const activeCallback = dependencies.callbackClient || callbackClient();
   const app = createApp({
     publisher: activePublisher, logger: logger(), mqttTopic: 'test/topic', callbackClient: activeCallback,
-    dynamicQaWait: dependencies.dynamicQaWait || (async () => {})
+    dynamicQaWait: dependencies.dynamicQaWait || (async () => {}),
+    dynamicQaGetBusinessDate: dependencies.getBusinessDate || fixedHcBusinessDate
   });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
@@ -80,7 +83,7 @@ async function post(body, dependencies = {}) {
 function validatedAnswer(action, params) {
   const validated = validateDynamicQaCommand({ action, params });
   assert.equal(validated.error, undefined);
-  return buildDynamicQaAnswer(validated.value);
+  return buildDynamicQaAnswer(validated.value, { getBusinessDate: fixedHcBusinessDate });
 }
 function normalizedContext() {
   return { agent: 'dynamic-agent', replyTo: 'dynamic-user@example.com', groupchat: false, callback: 'http://127.0.0.1:29876/agent/send' };
@@ -104,15 +107,19 @@ test('dynamic QA language is required and normalized only from params.language',
   assert.match(validateDynamicQaCommand({ action: '查询累计用电量', params: { day: 7 } }).error, /language/);
 });
 
+test('HC business date derives calendar fields from Asia/Shanghai instead of the server default time zone', () => {
+  assert.deepEqual(getHcBusinessDate(new Date('2026-09-07T16:30:00.000Z')), { year: 2026, month: 9, day: 8 });
+});
+
 test('energy actions return the formal day values and reference averages without natural-language parsing', () => {
   const cases = [
     ['查询累计用气量', { day: 7, language: 'zh-CN' }, '本月第7日累计用气量为5418.9立方米。'],
     ['查询累计用气量', { language: 'zh-CN' }, '本月累计用气量的参考平均值为12,396.30立方米。'],
-    ['查询累计用水量', { day: 16, language: 'zh-CN' }, '本月第16日累计用水量为44345.8立方米。'],
+    ['查询累计用水量', { day: 6, language: 'zh-CN' }, '本月第6日累计用水量为16612.1立方米。'],
     ['查询累计用电量', { day: 7, language: 'zh-CN' }, '本月第7日累计用电量为13.97吉瓦时。'],
     ['查询累计用电量', { day: 7, language: 'en-US' }, 'The electricity consumption on day 7 was 13.97 gigawatt-hours.'],
     ['查询累计用电量', { language: 'zh-CN' }, '本月累计用电量的参考平均值为32.26吉瓦时。'],
-    ['查询节能达成率', { day: 11, language: 'zh-CN' }, '本月第11日节能达成率为99.4%。'],
+    ['查询节能达成率', { day: 8, language: 'zh-CN' }, '本月第8日节能达成率为98.7%。'],
     ['查询节能达成率', { language: 'zh-CN' }, '本月节能达成率的参考平均值为97.44%。']
   ];
   for (const [action, params, expected] of cases) assert.equal(validatedAnswer(action, params), expected);
@@ -132,7 +139,7 @@ test('work-order actions return September, November, and reference values withou
     ['查询待处理工单', { month: 9, language: 'zh-CN' }, '9月待处理工单有278单。'],
     ['查询待处理工单', { language: 'zh-CN' }, '月度待处理工单的参考平均值为329.83单。'],
     ['查询已关闭工单', { month: 9, language: 'en-US' }, 'There were 145 service tickets closed in September.'],
-    ['查询已关闭工单', { month: 11, language: 'zh-CN' }, '11月已关闭工单有165单。'],
+    ['查询已关闭工单', { month: 8, language: 'zh-CN' }, '8月已关闭工单有194单。'],
     ['查询已关闭工单', { language: 'zh-CN' }, '月度已关闭工单的参考平均值为165.83单。'],
     ['查询工单处理情况', { month: 9, language: 'zh-CN' }, '9月工单处理情况为：处理中5312单、待处理278单、已关闭145单。'],
     ['查询工单处理情况', { language: 'en-US' }, 'The reference monthly averages are 5,576.25 processing service tickets, 329.83 pending service tickets, and 165.83 closed service tickets.']
@@ -140,6 +147,44 @@ test('work-order actions return September, November, and reference values withou
   for (const [action, params, expected] of cases) assert.equal(validatedAnswer(action, params), expected);
   assert.equal(WORK_ORDER_DATA[9].closed, 145);
   assert.equal(WORK_ORDER_DATA[11].closed, 165);
+});
+
+test('future daily energy queries return the same simulated values as last-year reference data in Chinese and English', () => {
+  const cases = [
+    ['查询累计用气量', { day: 20, language: 'zh-CN' }, '您查询的日期尚未到达，当前暂无该日期的本月累计用气数据。作为参考，去年同期9月20日的累计用气量为15498.1立方米。'],
+    ['查询累计用水量', { day: 20, language: 'zh-CN' }, '您查询的日期尚未到达，当前暂无该日期的本月累计用水数据。作为参考，去年同期9月20日的累计用水量为55431.1立方米。'],
+    ['查询累计用电量', { day: 20, language: 'zh-CN' }, '您查询的日期尚未到达，当前暂无该日期的本月累计用电数据。作为参考，去年同期9月20日的累计用电量为40.18吉瓦时。'],
+    ['查询节能达成率', { day: 20, language: 'zh-CN' }, '您查询的日期尚未到达，当前暂无该日期的本月节能达成率数据。作为参考，去年同期9月20日的节能达成率为97.6%。'],
+    ['查询累计用气量', { day: 20, language: 'en-US' }, 'The date you asked about has not yet arrived, so current-period cumulative gas consumption data for that date is not yet available. For reference, the cumulative gas consumption for the same period last year, on September 20, was 15498.1 cubic meters.'],
+    ['查询累计用水量', { day: 20, language: 'en-US' }, 'The date you asked about has not yet arrived, so current-period cumulative water consumption data for that date is not yet available. For reference, the cumulative water consumption for the same period last year, on September 20, was 55431.1 cubic meters.'],
+    ['查询累计用电量', { day: 20, language: 'en-US' }, 'The date you asked about has not yet arrived, so current-period cumulative electricity consumption data for that date is not yet available. For reference, the cumulative electricity consumption for the same period last year, on September 20, was 40.18 gigawatt-hours.'],
+    ['查询节能达成率', { day: 20, language: 'en-US' }, 'The date you asked about has not yet arrived, so the current-period energy-saving achievement rate for that date is not yet available. For reference, the energy-saving achievement rate for the same period last year, on September 20, was 97.6 percent.']
+  ];
+  for (const [action, params, expected] of cases) assert.equal(validatedAnswer(action, params), expected);
+});
+
+test('past and current daily energy queries keep the current-period wording', () => {
+  assert.equal(validatedAnswer('查询累计用电量', { day: 7, language: 'zh-CN' }), '本月第7日累计用电量为13.97吉瓦时。');
+  assert.equal(validatedAnswer('查询累计用电量', { day: 8, language: 'zh-CN' }), '本月第8日累计用电量为16.05吉瓦时。');
+});
+
+test('future monthly work-order queries return last-year reference data in Chinese and English', () => {
+  const cases = [
+    ['查询处理中工单', { month: 10, language: 'zh-CN' }, '您查询的月份尚未到达，当前暂无该月份的工单统计数据。作为参考，去年同期10月处理中工单有4890单。'],
+    ['查询待处理工单', { month: 10, language: 'zh-CN' }, '您查询的月份尚未到达，当前暂无该月份的工单统计数据。作为参考，去年同期10月待处理工单有195单。'],
+    ['查询已关闭工单', { month: 10, language: 'zh-CN' }, '您查询的月份尚未到达，当前暂无该月份的工单统计数据。作为参考，去年同期10月已关闭工单有112单。'],
+    ['查询工单处理情况', { month: 10, language: 'zh-CN' }, '您查询的月份尚未到达，当前暂无该月份的工单统计数据。作为参考，去年同期10月工单处理情况为：处理中4890单、待处理195单、已关闭112单。'],
+    ['查询处理中工单', { month: 10, language: 'en-US' }, 'The month you asked about has not yet arrived, so service-ticket statistics for that month are not yet available. For reference, there were 4890 processing service tickets in October during the same period last year.'],
+    ['查询待处理工单', { month: 10, language: 'en-US' }, 'The month you asked about has not yet arrived, so service-ticket statistics for that month are not yet available. For reference, there were 195 pending service tickets in October during the same period last year.'],
+    ['查询已关闭工单', { month: 10, language: 'en-US' }, 'The month you asked about has not yet arrived, so service-ticket statistics for that month are not yet available. For reference, there were 112 closed service tickets in October during the same period last year.'],
+    ['查询工单处理情况', { month: 10, language: 'en-US' }, 'The month you asked about has not yet arrived, so service-ticket statistics for that month are not yet available. For reference, during the same period last year in October, there were 4890 processing service tickets, 195 pending service tickets, and 112 closed service tickets.']
+  ];
+  for (const [action, params, expected] of cases) assert.equal(validatedAnswer(action, params), expected);
+});
+
+test('past and current work-order months keep the current-period wording', () => {
+  assert.equal(validatedAnswer('查询待处理工单', { month: 8, language: 'zh-CN' }), '8月待处理工单有326单。');
+  assert.equal(validatedAnswer('查询待处理工单', { month: 9, language: 'zh-CN' }), '9月待处理工单有278单。');
 });
 
 test('day is optional but must be an integer from 1 through 31 for daily energy actions', () => {
@@ -223,12 +268,12 @@ test('HTTP ingress returns reference averages when day or month is absent', asyn
   assert.equal(pending.callbackClient.calls[0].options.body, '月度待处理工单的参考平均值为329.83单。');
 });
 
-test('energy dynamic QA publishes IOC immediately and callbacks once after the shared opening delay', async () => {
+test('future energy dynamic QA publishes IOC immediately and callbacks once after the shared opening delay', async () => {
   const executor = commandExecutor();
   const callback = callbackClient();
   const clock = controlledWait();
-  const handler = createDynamicQaHandler({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const command = validateDynamicQaCommand({ action: '查询累计用电量', params: { day: 7, language: 'zh-CN' } }).value;
+  const handler = createDynamicQaHandler({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait, getBusinessDate: fixedHcBusinessDate });
+  const command = validateDynamicQaCommand({ action: '查询累计用电量', params: { day: 20, language: 'zh-CN' } }).value;
   const execution = handler.execute({ command, context: normalizedContext(), requestId: 'energy-delay-test' });
 
   await eventually(() => executor.calls.length === 1 && clock.calls.length === 1);
@@ -241,15 +286,15 @@ test('energy dynamic QA publishes IOC immediately and callbacks once after the s
   clock.releaseNext();
   await execution;
   assert.equal(callback.calls.length, 1);
-  assert.equal(callback.calls[0].options.body, '本月第7日累计用电量为13.97吉瓦时。');
+  assert.equal(callback.calls[0].options.body, '您查询的日期尚未到达，当前暂无该日期的本月累计用电数据。作为参考，去年同期9月20日的累计用电量为40.18吉瓦时。');
 });
 
-test('work-order dynamic QA publishes IOC immediately and callbacks once after the shared opening delay', async () => {
+test('future work-order dynamic QA publishes IOC immediately and callbacks once after the shared opening delay', async () => {
   const executor = commandExecutor();
   const callback = callbackClient();
   const clock = controlledWait();
-  const handler = createDynamicQaHandler({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const command = validateDynamicQaCommand({ action: '查询已关闭工单', params: { month: 9, language: 'en-US' } }).value;
+  const handler = createDynamicQaHandler({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait, getBusinessDate: fixedHcBusinessDate });
+  const command = validateDynamicQaCommand({ action: '查询待处理工单', params: { month: 10, language: 'en-US' } }).value;
   const execution = handler.execute({ command, context: normalizedContext(), requestId: 'work-order-delay-test' });
 
   await eventually(() => executor.calls.length === 1 && clock.calls.length === 1);
@@ -262,7 +307,7 @@ test('work-order dynamic QA publishes IOC immediately and callbacks once after t
   clock.releaseNext();
   await execution;
   assert.equal(callback.calls.length, 1);
-  assert.equal(callback.calls[0].options.body, 'There were 145 service tickets closed in September.');
+  assert.equal(callback.calls[0].options.body, 'The month you asked about has not yet arrived, so service-ticket statistics for that month are not yet available. For reference, there were 195 pending service tickets in October during the same period last year.');
 });
 
 test('HTTP rejects invalid new parameters and retired actions without MQTT or callback', async () => {
