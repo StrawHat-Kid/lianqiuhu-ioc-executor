@@ -25,8 +25,8 @@ function createLogger() {
   return { info() {}, warn() {}, error() {} };
 }
 
-async function request(publisher, method, path, body, { rawBody = false } = {}) {
-  const app = createApp({ publisher, logger: createLogger(), mqttTopic: 'lianqiuhu/ioc/demo/commands' });
+async function request(publisher, method, path, body, { rawBody = false, logger = createLogger() } = {}) {
+  const app = createApp({ publisher, logger, mqttTopic: 'lianqiuhu/ioc/demo/commands' });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
@@ -340,6 +340,46 @@ test('HC business language publishes separately without changing the strict Scen
   }
   assert.deepEqual(await published('启动火灾预警', { language: 'zh' }), [[frontendLanguage('zh-CN')], fireBaseline]);
   assert.deepEqual(await published('启动火灾预警', { language: 'en' }), [[frontendLanguage('en-US')], fireBaseline]);
+});
+
+test('four basic HC frontend actions reuse independent language publish and preserve their business commands', async () => {
+  async function published(action, params, options) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params }], options);
+    assert.equal(response.status, 200, `${action} ${JSON.stringify(params)}`);
+    return publisher.calls.map(JSON.parse);
+  }
+
+  const cases = [
+    ['主题切换', { '主题名称': '综合安防' }, 'en-US'],
+    ['环境气象效果', { '天气': '小雨' }, 'en-US'],
+    ['环境季节效果', { '季节': '冬季' }, 'zh-CN'],
+    ['环境时间效果', { '时间': '18:30' }, 'en-US']
+  ];
+  for (const [action, businessParams, language] of cases) {
+    const expectedBusinessCommands = [frontendCommand(action, businessParams)];
+    assert.deepEqual(await published(action, businessParams), [expectedBusinessCommands], `${action} without language`);
+    assert.deepEqual(await published(action, { ...businessParams, language }), [
+      [frontendLanguage(language)], expectedBusinessCommands
+    ], `${action} with language`);
+  }
+
+  assert.deepEqual(await published('主题切换', { '主题名称': '综合安防', language: 'en' }), [
+    [frontendLanguage('en-US')], [frontendCommand('主题切换', { '主题名称': '综合安防' })]
+  ]);
+  assert.deepEqual(await published('环境季节效果', { '季节': '冬季', language: 'zh' }), [
+    [frontendLanguage('zh-CN')], [frontendCommand('环境季节效果', { '季节': '冬季' })]
+  ]);
+
+  const warnings = [];
+  const logger = { info() {}, error() {}, warn(message, details) { warnings.push({ message, details }); } };
+  assert.deepEqual(await published('环境气象效果', { '天气': '晴', language: 'jp-JP' }, { logger }), [
+    [frontendCommand('环境气象效果', { '天气': '晴' })]
+  ]);
+  assert.deepEqual(warnings, [{
+    message: '[语义转换] 忽略不支持的language参数，继续执行业务流程',
+    details: { requestId: warnings[0].details.requestId, commandIndex: 0, action: '环境气象效果', language: 'jp-JP' }
+  }]);
 });
 
 test('HC language publish completes before the unchanged business Scenario is published', async () => {

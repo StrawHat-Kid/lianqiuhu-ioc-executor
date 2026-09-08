@@ -1,5 +1,9 @@
 const { getHcCommandDefinition, normalizeHcLanguage, translateHcCommand } = require('./hc-command-registry');
 
+const HC_LANGUAGE_AUGMENTABLE_FRONTEND_ACTIONS = new Set([
+  '主题切换', '环境气象效果', '环境季节效果', '环境时间效果'
+]);
+
 function normalizeOptionalHcLanguage(value) {
   if (value === undefined || value === null || value === '') return null;
   return normalizeHcLanguage(value);
@@ -25,6 +29,21 @@ function isHcSemanticRequest(commands) {
   return Array.isArray(commands) && commands.some((item) =>
     typeof item?.action === 'string' && getHcCommandDefinition(item.action) !== null
   );
+}
+
+function isHcLanguageAugmentableFrontendRequest(commands) {
+  // 只涵盖四个正式基础 HC action，不能把任意前端直通 command 纳入 language 链路。
+  return Array.isArray(commands) && commands.length > 0 && commands.every((item) =>
+    HC_LANGUAGE_AUGMENTABLE_FRONTEND_ACTIONS.has(item?.action)
+  );
+}
+
+function removeHcLanguageParams(commands) {
+  return commands.map((item) => {
+    if (!Object.prototype.hasOwnProperty.call(item.params || {}, 'language')) return item;
+    const { language, ...businessParams } = item.params;
+    return { ...item, params: businessParams };
+  });
 }
 
 function validateHcSemanticCommands(commands) {
@@ -58,9 +77,11 @@ function translateHcCommands(commands) {
 
 module.exports = {
   isHcSemanticRequest,
+  isHcLanguageAugmentableFrontendRequest,
   validateHcSemanticCommands,
   translateHcCommands,
   normalizeOptionalHcLanguage,
   getIgnoredHcLanguageWarnings,
-  getRequestedHcLanguage
+  getRequestedHcLanguage,
+  removeHcLanguageParams
 };
