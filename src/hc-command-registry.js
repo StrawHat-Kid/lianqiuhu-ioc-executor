@@ -3,6 +3,14 @@ const capability = (name, commandName) => command('executeCapability', { capabil
 const theme = (name) => command('主题切换', { '主题名称': name });
 const operationCommand = (capabilityName, operation, commandName, extra = {}) =>
   command('executeOperation', { capability: capabilityName, operation, command: commandName, ...extra });
+const HC_LANGUAGE_ALIASES = Object.freeze({
+  zh: 'zh-CN',
+  'zh-CN': 'zh-CN',
+  en: 'en-US',
+  'en-US': 'en-US'
+});
+const normalizeHcLanguage = (value) =>
+  typeof value === 'string' ? HC_LANGUAGE_ALIASES[value] || null : null;
 
 // 来源：当前前端 park-ai Scenario Registry 与 Business Command Registry。
 // OSCA 只传本文件中的中文业务名称；capability、operation、固定参数均不得由 OSCA 覆盖。
@@ -246,9 +254,9 @@ const HC_PARAMETERIZED_REGISTRY = Object.freeze({
     businessName: '切换语言',
     command: 'set',
     validateParams: (params) => params && Object.keys(params).length === 1 &&
-      ['zh-CN', 'en-US'].includes(params.language),
+      normalizeHcLanguage(params.language) !== null,
     translate: (params) => [command('executeCapability', {
-      capability: 'global.language', command: 'set', language: params.language
+      capability: 'global.language', command: 'set', language: normalizeHcLanguage(params.language)
     })]
   })
 });
@@ -297,5 +305,6 @@ module.exports = {
   HC_COMMAND_REGISTRY,
   createCommandRegistry,
   getHcCommandDefinition,
+  normalizeHcLanguage,
   translateHcCommand
 };

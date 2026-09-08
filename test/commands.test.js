@@ -6,6 +6,8 @@ const { createMqttPublisher } = require('../src/mqtt-client');
 const { readConfig, sanitizeMqttUrl } = require('../src/config');
 const { validateFrontendCommands } = require('../src/validation');
 const { HC_BUSINESS_REGISTRY, HC_COMMAND_REGISTRY } = require('../src/hc-command-registry');
+const { translateHcCommands } = require('../src/hc-semantic');
+const { createCommandExecutor } = require('../src/command-executor');
 
 function createPublisher({ connected = true, publishError = null } = {}) {
   const calls = [];
@@ -39,6 +41,10 @@ async function request(publisher, method, path, body, { rawBody = false } = {}) 
     await new Promise((resolve) => server.close(resolve));
   }
 }
+
+const frontendLanguage = (language) => frontendCommand('executeCapability', {
+  capability: 'global.language', command: 'set', language
+});
 
 const validCommand = { action: '主题切换', params: { '主题名称': '综合安防' } };
 const validEnv = {
@@ -292,6 +298,117 @@ test('new HC semantics translate Quick, Alert, event operation, language, and ca
   }
 });
 
+test('HC business language publishes separately without changing the strict Scenario business array', async () => {
+  async function published(action, params) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action, params }]);
+    assert.equal(response.status, 200, `${action} ${JSON.stringify(params)}`);
+    return publisher.calls.map(JSON.parse);
+  }
+
+  const [fireBaseline] = await published('启动火灾预警', {});
+  assert.equal(fireBaseline.length, 7);
+  assert.deepEqual(
+    translateHcCommands([{ action: '启动火灾预警', params: { language: 'en-US' } }]),
+    fireBaseline
+  );
+  assert.deepEqual(await published('启动火灾预警', { language: 'en-US' }), [
+    [frontendLanguage('en-US')], fireBaseline
+  ]);
+  assert.deepEqual(await published('启动火灾预警', { language: 'zh-CN' }), [
+    [frontendLanguage('zh-CN')], fireBaseline
+  ]);
+
+  // 园区总览是 Quick，未佩戴安全帽告警是 Alert；语言和业务仍是两次独立发布。
+  for (const action of ['启动园区总览', '启动未佩戴安全帽告警']) {
+    const [baseline] = await published(action, {});
+    assert.deepEqual(
+      await published(action, { language: 'en-US' }),
+      [[frontendLanguage('en-US')], baseline],
+      action
+    );
+  }
+
+  const [cancelBaseline] = await published('取消火灾预警', {});
+  assert.deepEqual(
+    await published('取消火灾预警', { language: 'en-US' }),
+    [[frontendLanguage('en-US')], cancelBaseline]
+  );
+
+  for (const params of [{}, { language: undefined }, { language: null }, { language: '' }]) {
+    assert.deepEqual(await published('启动火灾预警', params), [fireBaseline], JSON.stringify(params));
+  }
+  assert.deepEqual(await published('启动火灾预警', { language: 'zh' }), [[frontendLanguage('zh-CN')], fireBaseline]);
+  assert.deepEqual(await published('启动火灾预警', { language: 'en' }), [[frontendLanguage('en-US')], fireBaseline]);
+});
+
+test('HC language publish completes before the unchanged business Scenario is published', async () => {
+  const calls = [];
+  let releaseLanguagePublish;
+  const languagePublished = new Promise((resolve) => { releaseLanguagePublish = resolve; });
+  const publisher = {
+    isConnected: () => true,
+    async publish(message) {
+      calls.push(JSON.parse(message));
+      if (calls.length === 1) await languagePublished;
+    }
+  };
+  const executor = createCommandExecutor({ publisher, logger: createLogger(), mqttTopic: 'test/topic' });
+  const execution = executor.executeCommandRequest([
+    { action: '启动火灾预警', params: { language: 'en-US' } }
+  ], { requestId: 'sequential-language-publish' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, [[frontendLanguage('en-US')]]);
+  releaseLanguagePublish();
+  assert.equal((await execution).status, 200);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].length, 7);
+  assert.deepEqual(calls[1][0], frontendTheme('综合安防'));
+});
+
+test('invalid HC business language warns and is ignored without blocking the business command', async () => {
+  const publisher = createPublisher();
+  const warnings = [];
+  const logger = { info() {}, error() {}, warn(message, details) { warnings.push({ message, details }); } };
+  const app = createApp({ publisher, logger, mqttTopic: 'lianqiuhu/ioc/demo/commands' });
+  const server = await new Promise((resolve) => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ action: '启动火灾预警', params: { language: 'jp-JP' } }])
+    });
+    assert.equal(response.status, 200);
+    assert.equal(publisher.calls.length, 1);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), [
+      frontendTheme('综合安防'),
+      frontendCapability('security.fireAlarmAlert', 'start'),
+      frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }),
+      frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'open' }),
+      frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'door', command: 'close' }),
+      frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyTeam', command: 'notify' }),
+      frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'smsNotification', command: 'notify', radius: 100 })
+    ]);
+    assert.deepEqual(warnings, [{
+      message: '[语义转换] 忽略不支持的language参数，继续执行业务流程',
+      details: { requestId: warnings[0].details.requestId, commandIndex: 0, action: '启动火灾预警', language: 'jp-JP' }
+    }]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('existing 切换语言 normalizes aliases and retains one formal language command without generic duplication', async () => {
+  for (const [inputLanguage, formalLanguage] of [['en-US', 'en-US'], ['en', 'en-US'], ['zh', 'zh-CN']]) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action: '切换语言', params: { language: inputLanguage } }]);
+    assert.equal(response.status, 200, inputLanguage);
+    assert.equal(publisher.calls.length, 1, inputLanguage);
+    assert.deepEqual(JSON.parse(publisher.calls[0]), [frontendLanguage(formalLanguage)], inputLanguage);
+  }
+});
+
 test('15 指令功能2.0 semantic starts expand to strict full-flow arrays and cancels retain parent lifecycle', async () => {
   const point = (capability, index) => frontendCommand('executeOperation', { capability, operation: 'landmarkPoint', command: 'select', index });
   const operation = (capability, name, command) => frontendCommand('executeOperation', { capability, operation: name, command });
@@ -321,7 +438,7 @@ test('15 指令功能2.0 semantic starts expand to strict full-flow arrays and c
 });
 
 test('切换语言 rejects missing, extra, and unsupported language params', async () => {
-  for (const params of [{}, { language: 'zh' }, { language: 'fr-FR' }, { language: 'zh-CN', extra: true }]) {
+  for (const params of [{}, { language: 'fr-FR' }, { language: 'zh-CN', extra: true }]) {
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action: '切换语言', params }]);
     assert.equal(response.status, 400, JSON.stringify(params));
