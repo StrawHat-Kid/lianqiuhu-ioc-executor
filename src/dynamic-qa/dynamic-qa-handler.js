@@ -3,6 +3,7 @@ const { sleep } = require('../narration/narration-session-manager');
 const { HC_INTRO_DELAY_MS } = require('../hc-return-timing');
 const { DYNAMIC_QA_ACTION_DEFINITIONS, dynamicQaPrepareCommands } = require('./dynamic-qa-definitions');
 const { buildDynamicQaAnswer } = require('./dynamic-qa-answer-builder');
+const { getHcBusinessDate } = require('../hc-business-date');
 
 const DYNAMIC_QA_ACTIONS = new Set(Object.keys(DYNAMIC_QA_ACTION_DEFINITIONS));
 
@@ -43,16 +44,17 @@ function validateDynamicQaCommand(command) {
   }
 }
 
-function createDynamicQaHandler({ commandExecutor, callbackClient, logger, wait = sleep } = {}) {
+function createDynamicQaHandler({ commandExecutor, callbackClient, logger, wait = sleep, getBusinessDate = getHcBusinessDate } = {}) {
   if (!commandExecutor || typeof commandExecutor.publishFrontendCommands !== 'function') throw new Error('dynamic QA command executor is required');
   if (!callbackClient || typeof callbackClient.sendAgentMessage !== 'function') throw new Error('dynamic QA callback client is required');
   if (typeof wait !== 'function') throw new Error('dynamic QA wait must be a function');
+  if (typeof getBusinessDate !== 'function') throw new Error('dynamic QA business date getter must be a function');
   const log = logger || { info() {}, warn() {}, error() {} };
 
   async function execute({ command, context, requestId }) {
     const callbackError = getCallbackContextError(context);
     if (callbackError) return { ok: false, status: 400, error: `dynamic QA callback unavailable: ${callbackError}` };
-    const answer = buildDynamicQaAnswer(command);
+    const answer = buildDynamicQaAnswer(command, { getBusinessDate });
     const iocCommands = dynamicQaPrepareCommands(command.language);
     log.info('[动态问答] 已生成答案并准备IOC动作', {
       requestId, action: command.action, language: command.language, iocCommands
