@@ -51,16 +51,16 @@ function createDynamicQaHandler({ commandExecutor, callbackClient, logger, wait 
   if (typeof getBusinessDate !== 'function') throw new Error('dynamic QA business date getter must be a function');
   const log = logger || { info() {}, warn() {}, error() {} };
 
-  async function execute({ command, context, requestId }) {
+  async function execute({ command, context, requestId, exhibitionId }) {
     const callbackError = getCallbackContextError(context);
     if (callbackError) return { ok: false, status: 400, error: `dynamic QA callback unavailable: ${callbackError}` };
     const answer = buildDynamicQaAnswer(command, { getBusinessDate });
     const iocCommands = dynamicQaPrepareCommands(command.language);
     log.info('[动态问答] 已生成答案并准备IOC动作', {
-      requestId, action: command.action, language: command.language, iocCommands
+      requestId, exhibitionId, action: command.action, language: command.language, iocCommands
     });
     const publishResult = await commandExecutor.publishFrontendCommands(iocCommands, {
-      source: `dynamic-qa:${command.action}`, requestId
+      source: `dynamic-qa:${command.action}`, requestId, exhibitionId
     });
     if (!publishResult.ok) return publishResult;
     log.info('[动态问答] IOC动作已下发，等待HC开场播报完成', {

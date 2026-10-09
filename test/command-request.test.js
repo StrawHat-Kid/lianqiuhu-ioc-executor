@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { normalizeCommandRequest } = require('../src/command-request');
 const { createApp } = require('../src/server');
+const { createExhibitionAuth } = require('../src/exhibition-auth');
+
+const TEST_TOKEN = 'test-token-0123456789abcdef';
+const TEST_HALL = 'test-hall';
+const TEST_HEADERS = { 'Content-Type': 'application/json', 'X-HC-Token': TEST_TOKEN };
+
+function testAuth(logger = createLogger()) {
+  return createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger });
+}
 
 function createPublisher() {
   const calls = [];
@@ -24,13 +33,13 @@ function createCaptureLogger() {
 
 async function postCommands(body, { logger = createLogger(), narrationManager } = {}) {
   const publisher = createPublisher();
-  const app = createApp({ publisher, logger, mqttTopic: 'test/topic', narrationManager });
+  const app = createApp({ publisher, logger, mqttTopic: 'test/topic', narrationManager, exhibitionAuth: testAuth(logger) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      method: 'POST', headers: TEST_HEADERS, body: JSON.stringify(body)
     });
     return { response, body: await response.json(), publisher, logger };
   } finally {
@@ -73,10 +82,11 @@ test('envelope validation rejects malformed commands and context fields', () => 
 test('legacy HTTP array continues through the existing semantic translator and MQTT publish chain', async () => {
   const result = await postCommands([{ action: '启动园区总览', params: {} }]);
   assert.equal(result.response.status, 200);
-  assert.deepEqual(JSON.parse(result.publisher.calls[0]), [
+  assert.deepEqual(JSON.parse(result.publisher.calls[0]).commands, [
     { action: '主题切换', params: { '主题名称': '综合态势' } },
     { action: 'executeCapability', params: { capability: 'situation.parkOverview', command: 'start' } }
   ]);
+  assert.deepEqual(JSON.parse(result.publisher.calls[0]).exhibitionId, TEST_HALL);
 });
 
 test('context envelope executes commands through the same translator and does not publish context', async () => {
@@ -115,7 +125,7 @@ test('third-party AI actions have identical legacy and envelope MQTT output with
     });
     assert.equal(legacy.response.status, 200, action);
     assert.equal(envelope.response.status, 200, action);
-    assert.deepEqual(JSON.parse(legacy.publisher.calls[0]), expected, action);
+    assert.deepEqual(JSON.parse(legacy.publisher.calls[0]).commands, expected, action);
     assert.equal(envelope.publisher.calls[0], legacy.publisher.calls[0], action);
     assert.doesNotMatch(envelope.publisher.calls[0], /unused-agent|callback/);
   }
@@ -166,6 +176,7 @@ test('完整Narration信封返回202并把requestId传入会话准入', async ()
   }, { logger, narrationManager });
   assert.equal(result.response.status, 202);
   assert.match(calls[0].requestId, /^req-/);
+  assert.equal(calls[0].exhibitionId, TEST_HALL);
   assert.ok(logger.entries.some((entry) => entry.message.includes('准入成功') && entry.details.sessionId === 'session-log-test'));
 });
 

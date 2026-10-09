@@ -82,6 +82,7 @@ test('a real mock 401 still allows narration cleanup to run', async () => {
   });
   try {
     const started = manager.startNarration({
+      exhibitionId: 'test-hall',
       definition: PARK_BASE_OVERVIEW,
       context: callbackContext(ingress.url),
       language: 'zh-CN'

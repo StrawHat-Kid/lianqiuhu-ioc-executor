@@ -126,10 +126,10 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
     throw new Error('narration callback client is required');
   }
   if (!Number.isFinite(durationScale) || durationScale <= 0) throw new Error('narration duration scale must be positive');
-  let activeSession = null;
+  const activeSessions = new Map();
 
   function sessionDetails(session, extra = {}) {
-    return { requestId: session.requestId, sessionId: session.id, scenario: session.scenario, ...extra };
+    return { requestId: session.requestId, sessionId: session.id, scenario: session.scenario, exhibitionId: session.exhibitionId, ...extra };
   }
 
   async function publishTerminal(session, mode) {
@@ -139,7 +139,8 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
     const commands = mode === 'complete' ? session.definition.completeCommands : session.definition.cancelCommands;
     logger.info('[讲解] 开始执行会话清理', sessionDetails(session, { mode }));
     session.terminalPromise = commandExecutor.publishFrontendCommands(commands, {
-      source: `narration:${session.scenario}:${mode}`, requestId: session.requestId, sessionId: session.id
+      source: `narration:${session.scenario}:${mode}`, requestId: session.requestId, sessionId: session.id,
+      exhibitionId: session.exhibitionId
     }).then((result) => {
       if (!result.ok) logger.error('[讲解] 会话清理失败', sessionDetails(session, { stage: 'cleanup', error: result.error }));
       else logger.info('[讲解] 会话清理完成', sessionDetails(session, { mode }));
@@ -153,7 +154,10 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
 
   function completeSession(session, mode) {
     session.state = 'completed';
-    if (activeSession?.id === session.id) activeSession = null;
+    // 只允许会话自己释放自己的 Map 记录，避免旧会话清掉同展厅的新会话。
+    if (activeSessions.get(session.exhibitionId)?.id === session.id) {
+      activeSessions.delete(session.exhibitionId);
+    }
     logger.info(mode === 'complete' ? '[讲解] 会话正常完成' : '[讲解] 会话取消完成', sessionDetails(session, { mode }));
   }
 
@@ -167,7 +171,8 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
       logger.info('[讲解] Narration prepareCommands 开始', sessionDetails(session, { commands: prepareCommands }));
       if (prepareCommands.length > 0) {
         const prepareResult = await commandExecutor.publishFrontendCommands(prepareCommands, {
-          source: `narration:${session.scenario}:prepare`, requestId: session.requestId, sessionId: session.id
+          source: `narration:${session.scenario}:prepare`, requestId: session.requestId, sessionId: session.id,
+          exhibitionId: session.exhibitionId
         });
         if (!prepareResult.ok) {
           logger.error('[讲解] Narration prepareCommands 失败', sessionDetails(session, { stage: 'ioc-prepare', error: prepareResult.error }));
@@ -184,7 +189,8 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
       logger.info('[讲解] Narration introDelay 完成', sessionDetails(session, { introDelayMs }));
       if (session.abortController.signal.aborted) return;
       const startResult = await commandExecutor.publishFrontendCommands(session.definition.startCommands, {
-        source: `narration:${session.scenario}:start`, requestId: session.requestId, sessionId: session.id
+        source: `narration:${session.scenario}:start`, requestId: session.requestId, sessionId: session.id,
+        exhibitionId: session.exhibitionId
       });
       if (!startResult.ok) {
         logger.error('[讲解] IOC起始指令发布失败', sessionDetails(session, { stage: 'ioc-start', error: startResult.error }));
@@ -222,7 +228,7 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
           }));
           const stepResult = await commandExecutor.publishFrontendCommands(commands, {
             source: `narration:${session.scenario}:segment-${lastSegment.index}`,
-            requestId: session.requestId, sessionId: session.id
+            requestId: session.requestId, sessionId: session.id, exhibitionId: session.exhibitionId
           });
           if (!stepResult.ok) {
             logger.error('[讲解] IOC展示步骤切换失败', sessionDetails(session, {
@@ -297,16 +303,20 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
     return true;
   }
 
-  function startNarration({ definition, context, language, requestId }) {
+  function startNarration({ definition, context, language, requestId, exhibitionId }) {
+    if (typeof exhibitionId !== 'string' || exhibitionId.trim() === '') {
+      return { ok: false, error: 'narration exhibitionId is required' };
+    }
+    const hallId = exhibitionId.trim();
     const callbackError = getCallbackContextError(context);
     if (callbackError) return { ok: false, error: `narration callback unavailable: ${callbackError}` };
-    const previousSession = activeSession;
+    const previousSession = activeSessions.get(hallId);
     const session = {
-      id: randomUUID(), requestId, scenario: definition.scenario, context, language,
+      id: randomUUID(), requestId, exhibitionId: hallId, scenario: definition.scenario, context, language,
       state: 'created', startedAt: new Date().toISOString(), abortController: new AbortController(),
       definition, iocStarted: false, terminalPublished: false, terminalPromise: null, runPromise: null
     };
-    activeSession = session;
+    activeSessions.set(hallId, session);
     logger.info('[讲解] 已接收讲解请求', sessionDetails(session, { action: definition.action, language: session.language }));
     session.runPromise = (async () => {
       if (previousSession) await cancelSession(previousSession, 'preempted');
@@ -319,13 +329,16 @@ function createNarrationSessionManager({ commandExecutor, callbackClient, logger
     return { ok: true, session };
   }
 
+  // 服务关闭等全局操作：并行取消所有展厅的活跃会话。
   async function cancelActiveNarration(reason = 'cancelled') {
-    return cancelSession(activeSession, reason);
+    const sessions = [...activeSessions.values()];
+    const results = await Promise.all(sessions.map((session) => cancelSession(session, reason)));
+    return results.some(Boolean);
   }
 
   return {
     startNarration, cancelActiveNarration,
-    getActiveSession: () => activeSession,
+    getActiveSession: (exhibitionId) => activeSessions.get(exhibitionId) || null,
     sleep
   };
 }

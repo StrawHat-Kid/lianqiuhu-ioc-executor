@@ -5,6 +5,7 @@ const { createApp } = require('../src/server');
 const { createCommandExecutor } = require('../src/command-executor');
 const { createRuisiCallbackClient } = require('../src/ruisi-callback-client');
 const { createNarrationSessionManager, sleep, getEffectiveSegmentDurationMs } = require('../src/narration/narration-session-manager');
+const { createExhibitionAuth } = require('../src/exhibition-auth');
 const {
   PARK_BASE_OVERVIEW, PARK_BASE_OVERVIEW_ACTION,
   PARK_REALTIME_NARRATION, PARK_REALTIME_NARRATION_ACTION,
@@ -60,6 +61,13 @@ const energyEnTexts = [
 const ENERGY_FORBIDDEN_COMMANDS = /energy\.(thirdPartyAgent|photovoltaicMonitoring|aiEnergyAssistant|energyFlow|aiAlgorithm)|workOrder|maintenance/;
 
 function logger() { return { info() {}, warn() {}, error() {} }; }
+const TEST_TOKEN = 'test-token-0123456789abcdef';
+const TEST_HALL = 'test-hall';
+const TEST_HEADERS = { 'Content-Type': 'application/json', 'X-HC-Token': TEST_TOKEN };
+const publishedCommands = (message) => JSON.parse(message).commands;
+function testAuth() {
+  return createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger: logger() });
+}
 function context(callback = 'http://127.0.0.1:29876/agent/send', suffix = '') {
   return { agent: `agent${suffix}`, replyTo: `user${suffix}@example.com`, groupchat: false, callback };
 }
@@ -139,7 +147,7 @@ test('park base overview zh narration publishes start, callbacks fixed text, wai
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+  const started = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1);
   assert.equal(started.session.state, 'running');
   assert.equal(executor.calls.length, 2);
@@ -162,7 +170,7 @@ test('English narration and language normalization use the frozen English answer
   const executor = commandExecutor();
   const callback = callbackClient();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: async () => {} });
-  const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: parsed.language });
+  const started = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: parsed.language });
   await started.session.runPromise;
   assert.deepEqual(executor.calls[0].commands, PARK_BASE_OVERVIEW.prepareCommandsByLanguage['en-US']);
   assert.equal(callback.calls[0].options.body, enText);
@@ -183,7 +191,7 @@ test('park base overview language aliases explicitly synchronize IOC language be
     const callback = callbackClient();
     const clock = manualWait();
     const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-    const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: parsed.language });
+    const started = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: parsed.language });
 
     await eventually(() => callback.calls.length === 1 && clock.calls.length === 1);
     assert.deepEqual(executor.calls[0].commands, [
@@ -219,7 +227,7 @@ test('park base overview keeps the UE roam floor independent of speech scale, wh
     const manager = createNarrationSessionManager({
       commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: scale, wait: clock.wait
     });
-    const started = manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+    const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
     await eventually(() => clock.calls.length === 1);
     assert.equal(clock.calls[0].ms, expectedMs);
     assert.equal(executor.calls.length, 2, 'cancel must not publish before the effective hold completes');
@@ -235,7 +243,7 @@ test('park base overview abort bypasses the IOC hold floor and immediately publi
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: callbackClient(), logger: logger(), durationScale: 0.1, wait: clock.wait
   });
-  const started = manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1);
   assert.equal(clock.calls[0].ms, 30000);
   await manager.cancelActiveNarration('test abort');
@@ -253,7 +261,7 @@ test('callback failure or timeout result does not block duration wait and cleanu
     const manager = createNarrationSessionManager({
       commandExecutor: executor, callbackClient: callbackClient([callbackResult]), logger: logger(), wait: clock.wait
     });
-    const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+    const started = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
     await eventually(() => clock.calls.length === 1);
     clock.calls[0].resolve();
     await started.session.runPromise;
@@ -265,7 +273,7 @@ test('callback failure or timeout result does not block duration wait and cleanu
 test('narration without callback-ready context does not publish IOC holding commands', async () => {
   const executor = commandExecutor();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callbackClient(), logger: logger() });
-  const result = await manager.startNarration({
+  const result = await manager.startNarration({ exhibitionId: TEST_HALL,
     definition: PARK_BASE_OVERVIEW, context: { agent: 'agent', replyTo: 'user@example.com', groupchat: false }, language: 'zh-CN'
   });
   assert.deepEqual(result, { ok: false, error: 'narration callback unavailable: missing context.callback' });
@@ -277,12 +285,12 @@ test('new narration preempts old one and old cleanup cannot release or cancel th
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const first = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(undefined, 'A'), language: 'zh-CN' });
+  const first = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(undefined, 'A'), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1);
-  const second = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'en-US' });
+  const second = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'en-US' });
   await eventually(() => clock.calls.length === 2);
   assert.equal(first.session.state, 'completed');
-  assert.equal(manager.getActiveSession().id, second.session.id);
+  assert.equal(manager.getActiveSession(TEST_HALL).id, second.session.id);
   assert.equal(callback.calls[0].sessionContext.replyTo, 'userA@example.com');
   assert.equal(callback.calls[1].sessionContext.replyTo, 'userB@example.com');
   assert.deepEqual(executor.calls.map((call) => call.meta.source), [
@@ -290,7 +298,7 @@ test('new narration preempts old one and old cleanup cannot release or cancel th
     'narration:parkBaseOverview:prepare', 'narration:parkBaseOverview:start'
   ]);
   clock.calls[0].resolve();
-  assert.equal(manager.getActiveSession().id, second.session.id);
+  assert.equal(manager.getActiveSession(TEST_HALL).id, second.session.id);
   clock.calls[1].resolve();
   await second.session.runPromise;
   assert.deepEqual(executor.calls.map((call) => call.meta.source), [
@@ -302,14 +310,14 @@ test('new narration preempts old one and old cleanup cannot release or cancel th
 test('cancelActiveNarration is idempotent and aborts a real sleep immediately', async () => {
   const executor = commandExecutor();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callbackClient(), logger: logger(), wait: sleep });
-  const started = await manager.startNarration({
+  const started = await manager.startNarration({ exhibitionId: TEST_HALL,
     definition: { ...PARK_BASE_OVERVIEW, introDelayMs: 0 }, context: context(), language: 'zh-CN'
   });
   await eventually(() => started.session.iocStarted);
   await Promise.all([manager.cancelActiveNarration('test'), manager.cancelActiveNarration('test')]);
   assert.equal(started.session.state, 'completed');
   assert.equal(executor.calls.filter((call) => call.meta.source.endsWith(':cancel')).length, 1);
-  assert.equal(manager.getActiveSession(), null);
+  assert.equal(manager.getActiveSession(TEST_HALL), null);
 });
 
 test('shutdown cancellation uses the same cleanup path and background exceptions stay handled', async () => {
@@ -319,7 +327,7 @@ test('shutdown cancellation uses the same cleanup path and background exceptions
     callbackClient: { sendAgentMessage: async () => { throw new Error('unexpected callback error'); } },
     logger: logger(), wait: async () => {}
   });
-  const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+  const started = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
   await started.session.runPromise;
   assert.equal(started.session.state, 'completed');
   assert.equal(executor.calls.filter((call) => call.meta.source.endsWith(':cancel')).length, 1);
@@ -328,7 +336,7 @@ test('shutdown cancellation uses the same cleanup path and background exceptions
   const shutdownManager = createNarrationSessionManager({
     commandExecutor: commandExecutor(), callbackClient: callbackClient(), logger: logger(), wait: waiting.wait
   });
-  const active = await shutdownManager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+  const active = await shutdownManager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
   await eventually(() => waiting.calls.length === 1);
   await shutdownManager.cancelActiveNarration('shutdown');
   assert.equal(active.session.cancelReason, 'shutdown');
@@ -340,7 +348,7 @@ test('duration scale is applied only to definition duration and invalid scale is
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: callbackClient(), logger: logger(), durationScale: 1.2, wait: async () => {}
   });
-  const started = await manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
+  const started = await manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(), language: 'zh-CN' });
   await started.session.runPromise;
   assert.equal(PARK_BASE_OVERVIEW.segments[0].content['zh-CN'].durationMs * 1.2, 24000);
   assert.throws(() => createNarrationSessionManager({ commandExecutor: executor, callbackClient: callbackClient(), logger: logger(), durationScale: 0 }), /scale/);
@@ -358,13 +366,13 @@ test('HTTP narration is accepted immediately and full mock callback E2E follows 
   const narrationManager = createNarrationSessionManager({
     commandExecutor: commandExecutorInstance, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: commandExecutorInstance, narrationManager });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: commandExecutorInstance, narrationManager, exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: TEST_HEADERS,
       body: JSON.stringify({
         context: { agent: 'e2e-agent', reply_to: 'e2e-user@example.com', groupchat: false, callback: ingress.url },
         commands: [{ action: PARK_BASE_OVERVIEW_ACTION, params: { language: 'zh-CN' } }]
@@ -374,13 +382,15 @@ test('HTTP narration is accepted immediately and full mock callback E2E follows 
     assert.equal(response.status, 202);
     assert.equal(body.ok, true);
     await eventually(() => publisher.calls.length === 2 && callbackMessages.length === 1 && clock.calls.length === 1);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
-    assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_BASE_OVERVIEW.startCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
+    assert.deepEqual(publishedCommands(publisher.calls[1]), PARK_BASE_OVERVIEW.startCommands);
+    assert.equal(JSON.parse(publisher.calls[0]).exhibitionId, TEST_HALL);
     assert.deepEqual(callbackMessages[0], { agent: 'e2e-agent', to: 'e2e-user@example.com', body: zhText, groupchat: false });
     assert.equal(publisher.calls.length, 2, 'HTTP returned before the narration duration elapsed');
     clock.calls[0].resolve();
     await eventually(() => publisher.calls.length === 3);
-    assert.deepEqual(JSON.parse(publisher.calls[2]), PARK_BASE_OVERVIEW.completeCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[2]), PARK_BASE_OVERVIEW.completeCommands);
+    assert.equal(JSON.parse(publisher.calls[2]).exhibitionId, TEST_HALL);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await ingress.close();
@@ -389,19 +399,19 @@ test('HTTP narration is accepted immediately and full mock callback E2E follows 
 
 test('HTTP narration rejects unavailable callback and regular commands retain normal executor behavior', async () => {
   const publisher = { calls: [], isConnected: () => true, publish: async (message) => publisher.calls.push(message) };
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic' });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const rejected = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: TEST_HEADERS,
       body: JSON.stringify({ commands: [{ action: PARK_BASE_OVERVIEW_ACTION, params: {} }] })
     });
     assert.equal(rejected.status, 400);
     assert.equal(publisher.calls.length, 0);
     const ordinary = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: TEST_HEADERS,
       body: JSON.stringify([{ action: '主题切换', params: { '主题名称': '综合安防' } }])
     });
     assert.equal(ordinary.status, 200);
@@ -419,13 +429,13 @@ test('real fetch ECONNREFUSED still returns HTTP 202, waits, and publishes narra
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient({ timeoutMs: 100 }), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: TEST_HEADERS,
       body: JSON.stringify({
         context: { agent: 'offline-agent', reply_to: 'offline-user@example.com', groupchat: false, callback: callbackUrl },
         commands: [{ action: PARK_BASE_OVERVIEW_ACTION, params: {} }]
@@ -433,11 +443,11 @@ test('real fetch ECONNREFUSED still returns HTTP 202, waits, and publishes narra
     });
     assert.equal(response.status, 202);
     await eventually(() => clock.calls.length === 1);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
-    assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_BASE_OVERVIEW.startCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), PARK_BASE_OVERVIEW.prepareCommandsByLanguage['zh-CN']);
+    assert.deepEqual(publishedCommands(publisher.calls[1]), PARK_BASE_OVERVIEW.startCommands);
     clock.calls[0].resolve();
     await eventually(() => publisher.calls.length === 3);
-    assert.deepEqual(JSON.parse(publisher.calls[2]), PARK_BASE_OVERVIEW.completeCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[2]), PARK_BASE_OVERVIEW.completeCommands);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -457,12 +467,12 @@ test('a stuck old narration cannot hold a new HTTP request before 202 admission'
   };
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   const post = () => fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: TEST_HEADERS,
     body: JSON.stringify({
       context: { agent: 'agent', reply_to: 'user@example.com', groupchat: false, callback: 'http://127.0.0.1:29876/agent/send' },
       commands: [{ action: PARK_BASE_OVERVIEW_ACTION, params: {} }]
@@ -490,7 +500,7 @@ test('park realtime Narration 2.0 sends two callbacks: Steps1-4 combined, then S
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
   const expectedBodies = [realtimeZhTexts.slice(0, 4).join(''), realtimeZhTexts[4]];
   const expectedWaits = [33000, 17000 + 2000];
   for (let index = 1; index <= 2; index += 1) {
@@ -522,7 +532,7 @@ test('park realtime narration keeps the calibrated first-return wait unscaled wh
     commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: 0.1,
     wait: async (durationMs) => { durations.push(durationMs); }
   });
-  const started = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), [realtimeEnTexts.slice(0, 4).join(''), realtimeEnTexts[4]]);
   assert.deepEqual(durations, [12000, 36000, 3700]);
@@ -535,7 +545,7 @@ test('Narration 2.0 callback failure continues to Step5 and preemption prevents 
     { ok: false, status: 500, error: 'callback failed' }, { ok: false, status: null, error: 'timeout' }
   ]);
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: async () => {} });
-  const completed = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
+  const completed = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
   await completed.session.runPromise;
   assert.equal(callback.calls.length, 2);
   assert.deepEqual(executor.calls.at(-1).commands, PARK_REALTIME_NARRATION.completeCommands);
@@ -545,9 +555,9 @@ test('Narration 2.0 callback failure continues to Step5 and preemption prevents 
   const preemptManager = createNarrationSessionManager({
     commandExecutor: preemptExecutor, callbackClient: callbackClient(), logger: logger(), wait: preemptClock.wait
   });
-  const first = preemptManager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
+  const first = preemptManager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
   await eventually(() => preemptClock.calls.length === 1 && callback.calls.length === 2);
-  const second = preemptManager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'zh-CN' });
+  const second = preemptManager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:cancel'));
   assert.equal(preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:segment-5'), false);
   assert.equal(preemptExecutor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:complete'), false);
@@ -568,13 +578,13 @@ test('HTTP mock E2E sends two park realtime callbacks and only the Step5 MQTT se
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      method: 'POST', headers: TEST_HEADERS, body: JSON.stringify({
         context: { agent: 'realtime-agent', reply_to: 'realtime-user@example.com', groupchat: false, callback: ingress.url },
         commands: [{ action: PARK_REALTIME_NARRATION_ACTION, params: { language: 'zh-CN' } }]
       })
@@ -585,14 +595,14 @@ test('HTTP mock E2E sends two park realtime callbacks and only the Step5 MQTT se
       await eventually(() => messages.length === index && clock.calls.length === index);
       assert.equal(messages[index - 1].body, expectedBodies[index - 1]);
       if (index === 2) {
-        assert.deepEqual(JSON.parse(publisher.calls[2]), PARK_REALTIME_NARRATION.segments[4].commands);
+        assert.deepEqual(publishedCommands(publisher.calls[2]), PARK_REALTIME_NARRATION.segments[4].commands);
       }
       clock.calls[index - 1].resolve();
     }
     await eventually(() => publisher.calls.length === 4);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), PARK_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
-    assert.deepEqual(JSON.parse(publisher.calls[1]), PARK_REALTIME_NARRATION.startCommands);
-    assert.deepEqual(JSON.parse(publisher.calls[3]), PARK_REALTIME_NARRATION.completeCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), PARK_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
+    assert.deepEqual(publishedCommands(publisher.calls[1]), PARK_REALTIME_NARRATION.startCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[3]), PARK_REALTIME_NARRATION.completeCommands);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await ingress.close();
@@ -604,7 +614,7 @@ test('security Narration 2.0 sends two frozen Chinese returns and never mixes no
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
 
   const expectedBodies = [securityZhTexts.slice(0, 4).join(''), securityZhTexts[4]];
   for (let index = 1; index <= 2; index += 1) {
@@ -638,7 +648,7 @@ test('security narration keeps the calibrated first-return wait unscaled while S
     commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: 0.1,
     wait: async (durationMs) => { durations.push(durationMs); }
   });
-  const started = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), [securityEnTexts.slice(0, 4).join(''), securityEnTexts[4]]);
   assert.deepEqual(durations, [12000, 28000, 3700]);
@@ -654,7 +664,7 @@ test('security Narration 2.0 callback failures continue and preemption cancels b
     ]),
     logger: logger(), wait: async () => {}
   });
-  const completedSession = completed.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
+  const completedSession = completed.startNarration({ exhibitionId: TEST_HALL, definition: SECURITY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
   await completedSession.session.runPromise;
   assert.deepEqual(completedExecutor.calls.at(-1).commands, SECURITY_REALTIME_NARRATION.completeCommands);
 
@@ -664,9 +674,9 @@ test('security Narration 2.0 callback failures continue and preemption cancels b
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: preemptCallback, logger: logger(), wait: clock.wait
   });
-  const first = manager.startNarration({ definition: SECURITY_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
+  const first = manager.startNarration({ exhibitionId: TEST_HALL, definition: SECURITY_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1 && preemptCallback.calls.length === 1);
-  const second = manager.startNarration({ definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'zh-CN' });
+  const second = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_BASE_OVERVIEW, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:cancel'));
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:segment-4'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:segment-5'), false);
@@ -692,13 +702,13 @@ test('security HTTP mock E2E returns 202 then publishes two callbacks and only S
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      method: 'POST', headers: TEST_HEADERS, body: JSON.stringify({
         context: { agent: 'security-agent', reply_to: 'security-user@example.com', groupchat: false, callback: ingress.url },
         commands: [{ action: SECURITY_REALTIME_NARRATION_ACTION, params: { language: 'zh-CN' } }]
       })
@@ -708,13 +718,13 @@ test('security HTTP mock E2E returns 202 then publishes two callbacks and only S
     for (let index = 1; index <= 2; index += 1) {
       await eventually(() => messages.length === index && clock.calls.length === index);
       assert.equal(messages[index - 1].body, expectedBodies[index - 1]);
-      if (index === 2) assert.deepEqual(JSON.parse(publisher.calls[2]), SECURITY_REALTIME_NARRATION.segments[4].commands);
+      if (index === 2) assert.deepEqual(publishedCommands(publisher.calls[2]), SECURITY_REALTIME_NARRATION.segments[4].commands);
       clock.calls[index - 1].resolve();
     }
     await eventually(() => publisher.calls.length === 4);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), SECURITY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
-    assert.deepEqual(JSON.parse(publisher.calls[1]), SECURITY_REALTIME_NARRATION.startCommands);
-    assert.deepEqual(JSON.parse(publisher.calls[3]), SECURITY_REALTIME_NARRATION.completeCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), SECURITY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
+    assert.deepEqual(publishedCommands(publisher.calls[1]), SECURITY_REALTIME_NARRATION.startCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[3]), SECURITY_REALTIME_NARRATION.completeCommands);
     assert.doesNotMatch(publisher.calls.join('\n'), /security\.noHardHatAlert|noHardHatFullFlow|video\/open/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -727,7 +737,7 @@ test('energy Narration 2.0 sends two frozen Chinese returns and never mixes othe
   const callback = callbackClient();
   const clock = manualWait();
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
 
   const expectedBodies = [energyZhTexts.slice(0, 4).join(''), energyZhTexts[4]];
   for (let index = 1; index <= 2; index += 1) {
@@ -760,7 +770,7 @@ test('energy narration keeps the calibrated first-return wait unscaled while Ste
     commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: 0.1,
     wait: async (durationMs) => { durations.push(durationMs); }
   });
-  const started = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'en-US' });
   await started.session.runPromise;
   assert.deepEqual(callback.calls.map((call) => call.options.body), [energyEnTexts.slice(0, 4).join(''), energyEnTexts[4]]);
   assert.deepEqual(durations, [12000, 46000, 3700]);
@@ -776,7 +786,7 @@ test('energy Narration 2.0 callback failures continue and preemption cancels bef
     ]),
     logger: logger(), wait: async () => {}
   });
-  const completedSession = completed.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
+  const completedSession = completed.startNarration({ exhibitionId: TEST_HALL, definition: ENERGY_REALTIME_NARRATION, context: context(), language: 'zh-CN' });
   await completedSession.session.runPromise;
   assert.deepEqual(completedExecutor.calls.at(-1).commands, ENERGY_REALTIME_NARRATION.completeCommands);
 
@@ -786,9 +796,9 @@ test('energy Narration 2.0 callback failures continue and preemption cancels bef
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: preemptCallback, logger: logger(), wait: clock.wait
   });
-  const first = manager.startNarration({ definition: ENERGY_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
+  const first = manager.startNarration({ exhibitionId: TEST_HALL, definition: ENERGY_REALTIME_NARRATION, context: context(undefined, 'A'), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1 && preemptCallback.calls.length === 1);
-  const second = manager.startNarration({ definition: PARK_REALTIME_NARRATION, context: context(undefined, 'B'), language: 'zh-CN' });
+  const second = manager.startNarration({ exhibitionId: TEST_HALL, definition: PARK_REALTIME_NARRATION, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:cancel'));
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:segment-4'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:segment-5'), false);
@@ -814,13 +824,13 @@ test('energy HTTP mock E2E returns 202 then publishes two callbacks and only Ste
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth() });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      method: 'POST', headers: TEST_HEADERS, body: JSON.stringify({
         context: { agent: 'energy-agent', reply_to: 'energy-user@example.com', groupchat: false, callback: ingress.url },
         commands: [{ action: ENERGY_REALTIME_NARRATION_ACTION, params: { language: 'zh-CN' } }]
       })
@@ -830,13 +840,13 @@ test('energy HTTP mock E2E returns 202 then publishes two callbacks and only Ste
     for (let index = 1; index <= 2; index += 1) {
       await eventually(() => messages.length === index && clock.calls.length === index);
       assert.equal(messages[index - 1].body, expectedBodies[index - 1]);
-      if (index === 2) assert.deepEqual(JSON.parse(publisher.calls[2]), ENERGY_REALTIME_NARRATION.segments[4].commands);
+      if (index === 2) assert.deepEqual(publishedCommands(publisher.calls[2]), ENERGY_REALTIME_NARRATION.segments[4].commands);
       clock.calls[index - 1].resolve();
     }
     await eventually(() => publisher.calls.length === 4);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), ENERGY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
-    assert.deepEqual(JSON.parse(publisher.calls[1]), ENERGY_REALTIME_NARRATION.startCommands);
-    assert.deepEqual(JSON.parse(publisher.calls[3]), ENERGY_REALTIME_NARRATION.completeCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), ENERGY_REALTIME_NARRATION.prepareCommandsByLanguage['zh-CN']);
+    assert.deepEqual(publishedCommands(publisher.calls[1]), ENERGY_REALTIME_NARRATION.startCommands);
+    assert.deepEqual(publishedCommands(publisher.calls[3]), ENERGY_REALTIME_NARRATION.completeCommands);
     assert.doesNotMatch(publisher.calls.join('\n'), ENERGY_FORBIDDEN_COMMANDS);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -866,7 +876,7 @@ test('Narration 2.0 first-return calibrated waits use canonical languages and no
     const clock = manualWait();
     const language = validateNarrationCommand({ action, params: { language: requestedLanguage } }).language;
     const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-    const started = manager.startNarration({ definition, context: context(), language });
+    const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language });
 
     await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
     assert.deepEqual(executor.calls[0].commands, definition.prepareCommandsByLanguage[language]);
@@ -900,7 +910,7 @@ test('narration without returnGroupDelayMs keeps the derived first-return wait',
     returnGroups: [[1, 2], [3]]
   };
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
 
   await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
   assert.equal(clock.calls[0].ms, 7500);
@@ -925,13 +935,13 @@ test('all four narration definitions preempt in the final base-to-realtime-to-se
     PARK_BASE_OVERVIEW
   ];
   const sessions = [];
-  let started = manager.startNarration({ definition: definitions[0], context: context(undefined, '0'), language: 'zh-CN' });
+  let started = manager.startNarration({ exhibitionId: TEST_HALL, definition: definitions[0], context: context(undefined, '0'), language: 'zh-CN' });
   sessions.push(started.session);
   await eventually(() => clock.calls.length === 1);
 
   for (let index = 1; index < definitions.length; index += 1) {
     const previous = sessions.at(-1);
-    started = manager.startNarration({ definition: definitions[index], context: context(undefined, String(index)), language: 'zh-CN' });
+    started = manager.startNarration({ exhibitionId: TEST_HALL, definition: definitions[index], context: context(undefined, String(index)), language: 'zh-CN' });
     sessions.push(started.session);
     await eventually(() => executor.calls.some((call) => call.meta.source === `narration:${previous.scenario}:cancel`));
     await eventually(() => clock.calls.length === index + 1);
@@ -940,7 +950,7 @@ test('all four narration definitions preempt in the final base-to-realtime-to-se
 
   await manager.cancelActiveNarration('test final preemption cycle');
   await Promise.all(sessions.map((session) => session.runPromise));
-  assert.equal(manager.getActiveSession(), null);
+  assert.equal(manager.getActiveSession(TEST_HALL), null);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:parkRealtimeNarration:segment-2'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:securityRealtimeNarration:segment-2'), false);
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:energyRealtimeNarration:segment-2'), false);
@@ -971,7 +981,7 @@ test('prepareCommands run before introDelay, which blocks startCommands and the 
     prepareCommands: [{ action: 'testPrepare', params: {} }], introDelayMs: 12000
   });
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
 
   await eventually(() => clock.calls.length === 1);
   assert.equal(clock.calls[0].ms, 12000);
@@ -1008,7 +1018,7 @@ test('a 12000ms introDelay blocks start and callback through 11999ms, and durati
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: 0.1, wait: clock.wait
   });
-  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
 
   await eventually(() => pending.length === 1);
   assert.equal(pending[0].ms, 12000);
@@ -1034,7 +1044,7 @@ test('missing or zero introDelayMs remains compatible and does not add a wait', 
     const clock = manualWait({ autoResolveIntroDelay: false });
     const definition = testNarrationDefinition({ introDelayMs });
     const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-    const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+    const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
     await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
     assert.equal(clock.calls[0].ms, 1000);
     assert.deepEqual(executor.calls.map((call) => call.meta.source), ['narration:testNarration:start']);
@@ -1054,9 +1064,9 @@ test('preemption during introDelay aborts the old session before start, callback
     scenario: 'introB', prepareCommands: [{ action: 'prepareB', params: {} }], introDelayMs: 12000
   });
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const first = manager.startNarration({ definition: definitionA, context: context(undefined, 'A'), language: 'zh-CN' });
+  const first = manager.startNarration({ exhibitionId: TEST_HALL, definition: definitionA, context: context(undefined, 'A'), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1);
-  const second = manager.startNarration({ definition: definitionB, context: context(undefined, 'B'), language: 'zh-CN' });
+  const second = manager.startNarration({ exhibitionId: TEST_HALL, definition: definitionB, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => first.session.state === 'completed' && clock.calls.length === 2);
 
   assert.equal(executor.calls.some((call) => call.meta.source.startsWith('narration:introA:start')), false);
@@ -1069,7 +1079,7 @@ test('preemption during introDelay aborts the old session before start, callback
   await eventually(() => clock.calls.length === 3 && callback.calls.length === 1);
   clock.calls[2].resolve();
   await second.session.runPromise;
-  assert.equal(manager.getActiveSession(), null);
+  assert.equal(manager.getActiveSession(TEST_HALL), null);
 });
 
 test('postGapMs is independent of duration scale and is applied before the next segment', async () => {
@@ -1085,7 +1095,7 @@ test('postGapMs is independent of duration scale and is applied before the next 
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: callback, logger: logger(), durationScale: 0.1, wait: clock.wait
   });
-  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
   await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
   assert.equal(clock.calls[0].ms, 600);
   assert.equal(executor.calls.some((call) => call.meta.source.endsWith('segment-2')), false);
@@ -1127,7 +1137,7 @@ test('ttsStartupBufferMs does not delay the current segment callback', async () 
     ]
   });
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+  const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
 
   await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
   assert.deepEqual(executor.calls.map((call) => call.meta.source), [
@@ -1155,11 +1165,11 @@ test('preemption during a ttsStartupBufferMs wait prevents later steps, callback
   });
   const definitionB = testNarrationDefinition({ scenario: 'bufferB' });
   const manager = createNarrationSessionManager({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait });
-  const first = manager.startNarration({ definition: definitionA, context: context(undefined, 'A'), language: 'zh-CN' });
+  const first = manager.startNarration({ exhibitionId: TEST_HALL, definition: definitionA, context: context(undefined, 'A'), language: 'zh-CN' });
 
   await eventually(() => clock.calls.length === 1 && callback.calls.length === 1);
   assert.equal(clock.calls[0].ms, 5000);
-  const second = manager.startNarration({ definition: definitionB, context: context(undefined, 'B'), language: 'zh-CN' });
+  const second = manager.startNarration({ exhibitionId: TEST_HALL, definition: definitionB, context: context(undefined, 'B'), language: 'zh-CN' });
   await eventually(() => first.session.state === 'completed' && clock.calls.length === 2 && callback.calls.length === 2);
 
   assert.equal(executor.calls.some((call) => call.meta.source === 'narration:bufferA:segment-2'), false);
@@ -1168,7 +1178,7 @@ test('preemption during a ttsStartupBufferMs wait prevents later steps, callback
 
   clock.calls[1].resolve();
   await second.session.runPromise;
-  assert.equal(manager.getActiveSession(), null);
+  assert.equal(manager.getActiveSession(TEST_HALL), null);
 });
 
 test('minimumIocHoldMs compares the startup-plus-speech budget before adding postGapMs', () => {
@@ -1196,7 +1206,7 @@ test('minimumIocHoldMs remains unscaled and postGapMs is added after the protect
     const manager = createNarrationSessionManager({
       commandExecutor: executor, callbackClient: callbackClient(), logger: logger(), durationScale: 0.1, wait: clock.wait
     });
-    const started = manager.startNarration({ definition, context: context(), language: 'zh-CN' });
+    const started = manager.startNarration({ exhibitionId: TEST_HALL, definition, context: context(), language: 'zh-CN' });
     await eventually(() => clock.calls.length === 1);
     assert.equal(clock.calls[0].ms, 4000);
     clock.calls[0].resolve();

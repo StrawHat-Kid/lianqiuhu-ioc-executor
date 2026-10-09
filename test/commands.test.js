@@ -8,6 +8,10 @@ const { validateFrontendCommands } = require('../src/validation');
 const { HC_BUSINESS_REGISTRY, HC_COMMAND_REGISTRY } = require('../src/hc-command-registry');
 const { translateHcCommands } = require('../src/hc-semantic');
 const { createCommandExecutor } = require('../src/command-executor');
+const { createExhibitionAuth } = require('../src/exhibition-auth');
+
+const TEST_TOKEN = 'test-token-0123456789abcdef';
+const TEST_HALL = 'test-hall';
 
 function createPublisher({ connected = true, publishError = null } = {}) {
   const calls = [];
@@ -25,15 +29,23 @@ function createLogger() {
   return { info() {}, warn() {}, error() {} };
 }
 
+function testAuth(logger = createLogger()) {
+  return createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger });
+}
+
+const TEST_HEADERS = { 'Content-Type': 'application/json', 'X-HC-Token': TEST_TOKEN };
+const publishedEnvelope = (message) => JSON.parse(message);
+const publishedCommands = (message) => publishedEnvelope(message).commands;
+
 async function request(publisher, method, path, body, { rawBody = false, logger = createLogger() } = {}) {
-  const app = createApp({ publisher, logger, mqttTopic: 'lianqiuhu/ioc/demo/commands' });
+  const app = createApp({ publisher, logger, mqttTopic: 'lianqiuhu/ioc/demo/commands', exhibitionAuth: testAuth(logger) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers: body === undefined ? undefined : TEST_HEADERS,
       body: body === undefined ? undefined : rawBody ? body : JSON.stringify(body)
     });
     return { status: response.status, body: await response.json() };
@@ -54,7 +66,8 @@ const validEnv = {
   MQTT_PASSWORD: 'secret',
   MQTT_TOPIC: 'lianqiuhu/ioc/demo/commands',
   MQTT_QOS: '0',
-  MQTT_RETAIN: 'false'
+  MQTT_RETAIN: 'false',
+  HC_TOKEN_MAP: `${TEST_TOKEN}:${TEST_HALL}`
 };
 
 test('GET /health returns service status', async () => {
@@ -88,7 +101,7 @@ test('frontend command is published unchanged for compatible direct callers', as
   const publisher = createPublisher();
   const commands = [{ action: '主题切换', params: { '主题名称': '综合安防' } }];
   assert.equal((await request(publisher, 'POST', '/api/commands', commands)).status, 200);
-  assert.equal(publisher.calls[0], JSON.stringify(commands));
+  assert.deepEqual(publishedEnvelope(publisher.calls[0]), { exhibitionId: TEST_HALL, commands });
 });
 
 test('valid request calls MQTT publish', async () => {
@@ -101,7 +114,7 @@ test('published compatible frontend content is direct serialization of original 
   const publisher = createPublisher();
   const commands = [{ action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'start' } }];
   await request(publisher, 'POST', '/api/commands', commands);
-  assert.equal(publisher.calls[0], JSON.stringify(commands));
+  assert.deepEqual(publishedEnvelope(publisher.calls[0]), { exhibitionId: TEST_HALL, commands });
 });
 
 test('valid 启动园区实时运营情况 expands to its frozen frontend capability command', async () => {
@@ -110,12 +123,12 @@ test('valid 启动园区实时运营情况 expands to its frozen frontend capabi
     action: '启动园区实时运营情况', params: {}
   }]);
   assert.equal(response.status, 200);
-  assert.deepEqual(JSON.parse(publisher.calls[0]), [{
+  assert.deepEqual(publishedCommands(publisher.calls[0]), [{
     action: '主题切换', params: { '主题名称': '综合态势' }
   }, {
     action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'start' }
   }]);
-  assert.equal(validateFrontendCommands(JSON.parse(publisher.calls[0])), null);
+  assert.equal(validateFrontendCommands(publishedCommands(publisher.calls[0])), null);
   assert.equal(publisher.calls[0].includes('启动园区实时运营情况'), false);
 });
 
@@ -125,7 +138,7 @@ test('valid 启动园区总览 accepts empty params and expands to the frozen fr
     action: '启动园区总览', params: {}
   }]);
   assert.equal(response.status, 200);
-  const expanded = JSON.parse(publisher.calls[0]);
+  const expanded = publishedCommands(publisher.calls[0]);
   assert.equal(expanded.length, 2);
   assert.deepEqual(expanded, [{
     action: '主题切换', params: { '主题名称': '综合态势' }
@@ -141,7 +154,7 @@ test('取消园区总览 uses the existing park overview lifecycle command', asy
     action: '取消园区总览', params: {}
   }]);
   assert.equal(response.status, 200);
-  assert.deepEqual(JSON.parse(publisher.calls[0]), [
+  assert.deepEqual(publishedCommands(publisher.calls[0]), [
     frontendCapability('situation.parkOverview', 'cancel')
   ]);
 });
@@ -152,7 +165,7 @@ test('valid 取消园区实时运营情况 expands to the real cancel lifecycle 
     action: '取消园区实时运营情况', params: {}
   }]);
   assert.equal(response.status, 200);
-  assert.deepEqual(JSON.parse(publisher.calls[0]), [{
+  assert.deepEqual(publishedCommands(publisher.calls[0]), [{
     action: 'executeCapability', params: { capability: 'situation.parkRealTimeOperation', command: 'cancel' }
   }]);
 });
@@ -162,7 +175,7 @@ test('AI节能助手 start uses the frozen full Scenario and cancel uses its par
   for (const [action, command] of [['启动AI节能助手', 'start'], ['取消AI节能助手', 'cancel']]) {
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
     assert.equal(response.status, 200);
-    assert.deepEqual(JSON.parse(publisher.calls.at(-1)), command === 'start' ? [
+    assert.deepEqual(publishedCommands(publisher.calls.at(-1)), command === 'start' ? [
       { action: '主题切换', params: { '主题名称': '能源管理' } },
       { action: 'executeCapability', params: { capability: 'energy.aiEnergyAssistant', command: 'start' } },
       { action: 'executeOperation', params: { capability: 'energy.aiEnergyAssistant', operation: 'deviceStatusSliders', command: 'demonstrate' } }
@@ -211,7 +224,7 @@ test('existing HC businesses retain their frozen frontend arrays after registry 
       const publisher = createPublisher();
       const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
       assert.equal(response.status, 200, action);
-      const expanded = JSON.parse(publisher.calls[0]);
+      const expanded = publishedCommands(publisher.calls[0]);
       assert.deepEqual(expanded, expected, action);
       assert.equal(validateFrontendCommands(expanded), null, action);
       assert.equal(publisher.calls[0].includes(action), false, action);
@@ -294,7 +307,7 @@ test('new HC semantics translate Quick, Alert, event operation, language, and ca
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params }]);
     assert.equal(response.status, 200, action);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), expected, action);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), expected, action);
   }
 });
 
@@ -303,7 +316,7 @@ test('HC business language publishes separately without changing the strict Scen
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params }]);
     assert.equal(response.status, 200, `${action} ${JSON.stringify(params)}`);
-    return publisher.calls.map(JSON.parse);
+    return publisher.calls.map(publishedCommands);
   }
 
   const [fireBaseline] = await published('启动火灾预警', {});
@@ -347,7 +360,7 @@ test('four basic HC frontend actions reuse independent language publish and pres
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params }], options);
     assert.equal(response.status, 200, `${action} ${JSON.stringify(params)}`);
-    return publisher.calls.map(JSON.parse);
+    return publisher.calls.map(publishedCommands);
   }
 
   const cases = [
@@ -389,14 +402,14 @@ test('HC language publish completes before the unchanged business Scenario is pu
   const publisher = {
     isConnected: () => true,
     async publish(message) {
-      calls.push(JSON.parse(message));
+      calls.push(publishedCommands(message));
       if (calls.length === 1) await languagePublished;
     }
   };
   const executor = createCommandExecutor({ publisher, logger: createLogger(), mqttTopic: 'test/topic' });
   const execution = executor.executeCommandRequest([
     { action: '启动火灾预警', params: { language: 'en-US' } }
-  ], { requestId: 'sequential-language-publish' });
+  ], { requestId: 'sequential-language-publish', exhibitionId: TEST_HALL });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, [[frontendLanguage('en-US')]]);
   releaseLanguagePublish();
@@ -410,18 +423,18 @@ test('invalid HC business language warns and is ignored without blocking the bus
   const publisher = createPublisher();
   const warnings = [];
   const logger = { info() {}, error() {}, warn(message, details) { warnings.push({ message, details }); } };
-  const app = createApp({ publisher, logger, mqttTopic: 'lianqiuhu/ioc/demo/commands' });
+  const app = createApp({ publisher, logger, mqttTopic: 'lianqiuhu/ioc/demo/commands', exhibitionAuth: testAuth(logger) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { ...TEST_HEADERS },
       body: JSON.stringify([{ action: '启动火灾预警', params: { language: 'jp-JP' } }])
     });
     assert.equal(response.status, 200);
     assert.equal(publisher.calls.length, 1);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), [
+    assert.deepEqual(publishedCommands(publisher.calls[0]), [
       frontendTheme('综合安防'),
       frontendCapability('security.fireAlarmAlert', 'start'),
       frontendCommand('executeOperation', { capability: 'security.fireAlarmAlert', operation: 'emergencyCall', command: 'call' }),
@@ -445,7 +458,7 @@ test('existing 切换语言 normalizes aliases and retains one formal language c
     const response = await request(publisher, 'POST', '/api/commands', [{ action: '切换语言', params: { language: inputLanguage } }]);
     assert.equal(response.status, 200, inputLanguage);
     assert.equal(publisher.calls.length, 1, inputLanguage);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), [frontendLanguage(formalLanguage)], inputLanguage);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), [frontendLanguage(formalLanguage)], inputLanguage);
   }
 });
 
@@ -471,7 +484,7 @@ test('15 指令功能2.0 semantic starts expand to strict full-flow arrays and c
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
     assert.equal(response.status, 200, action);
-    assert.deepEqual(JSON.parse(publisher.calls[0]), expected, action);
+    assert.deepEqual(publishedCommands(publisher.calls[0]), expected, action);
     const cancel = await request(publisher, 'POST', '/api/commands', [{ action: action.replace('启动', '取消'), params: {} }]);
     assert.equal(cancel.status, 200, `${action} cancel`);
   }
@@ -511,7 +524,7 @@ test('four basic parameterized frontend controls retain their own parameter vali
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [command]);
     assert.equal(response.status, 200, command.action);
-    assert.equal(publisher.calls[0], JSON.stringify([command]));
+    assert.deepEqual(publishedEnvelope(publisher.calls[0]), { exhibitionId: TEST_HALL, commands: [command] });
   }
   for (const command of [
     { action: '主题切换', params: {} },
@@ -544,7 +557,7 @@ test('third-party AI semantics use only their own frozen theme and capability li
     const publisher = createPublisher();
     const response = await request(publisher, 'POST', '/api/commands', [{ action, params: {} }]);
     assert.equal(response.status, 200, action);
-    const emitted = JSON.parse(publisher.calls[0]);
+    const emitted = publishedCommands(publisher.calls[0]);
     assert.deepEqual(emitted, expected, action);
     assert.equal(validateFrontendCommands(emitted), null, action);
     assert.doesNotMatch(JSON.stringify(emitted), /realtimeSituation|noHardHat|photovoltaicMonitoring|aiEnergyAssistant|energyFlow|aiAlgorithm|workOrder/);
@@ -641,15 +654,22 @@ test('multiple commands are published once as one array', async () => {
   const publisher = createPublisher();
   const commands = [validCommand, { action: '主题切换', params: { '主题名称': '能源管理' } }];
   await request(publisher, 'POST', '/api/commands', commands);
-  assert.deepEqual(publisher.calls, [JSON.stringify(commands)]);
+  assert.deepEqual(publisher.calls.map(publishedEnvelope), [{ exhibitionId: TEST_HALL, commands }]);
 });
 
 test('readConfig accepts a valid first-phase configuration', () => {
   assert.deepEqual(readConfig(validEnv), {
     port: 8008, mqttUrl: validEnv.MQTT_URL, mqttUsername: validEnv.MQTT_USERNAME,
     mqttPassword: validEnv.MQTT_PASSWORD, mqttTopic: validEnv.MQTT_TOPIC,
-    mqttQos: 0, mqttRetain: false, ingressToken: undefined, ruisiCallbackTimeoutMs: 5000, narrationDurationScale: 1
+    mqttQos: 0, mqttRetain: false, ingressToken: undefined, ruisiCallbackTimeoutMs: 5000, narrationDurationScale: 1,
+    exhibitionTokens: new Map([[TEST_TOKEN, TEST_HALL]])
   });
+});
+
+test('readConfig requires a valid HC_TOKEN_MAP and does not fall back to no auth', () => {
+  assert.throws(() => readConfig({ ...validEnv, HC_TOKEN_MAP: undefined }), /HC_TOKEN_MAP/);
+  assert.throws(() => readConfig({ ...validEnv, HC_TOKEN_MAP: '' }), /HC_TOKEN_MAP/);
+  assert.throws(() => readConfig({ ...validEnv, HC_TOKEN_MAP: 'broken-entry' }), /format/);
 });
 
 test('readConfig accepts INGRESS_TOKEN and optional RUISI callback timeout', () => {

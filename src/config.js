@@ -1,4 +1,5 @@
 const dotenv = require('dotenv');
+const { parseTokenMap } = require('./exhibition-auth');
 
 function readConfig(env = process.env) {
   const required = ['MQTT_URL', 'MQTT_USERNAME', 'MQTT_PASSWORD', 'MQTT_TOPIC'];
@@ -34,6 +35,8 @@ function readConfig(env = process.env) {
   }
   const configuredScale = Number(env.HC_NARRATION_DURATION_SCALE || 1);
   const narrationDurationScale = Number.isFinite(configuredScale) && configuredScale > 0 ? configuredScale : 1;
+  // 鉴权配置无效时必须让启动失败，不能退化成无鉴权模式。
+  const exhibitionTokens = parseTokenMap(env.HC_TOKEN_MAP);
 
   return {
     port,
@@ -45,7 +48,8 @@ function readConfig(env = process.env) {
     mqttRetain: false,
     ingressToken: env.INGRESS_TOKEN || undefined,
     ruisiCallbackTimeoutMs,
-    narrationDurationScale
+    narrationDurationScale,
+    exhibitionTokens
   };
 }
 

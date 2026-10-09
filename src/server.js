@@ -10,6 +10,7 @@ const { createRuisiCallbackClient } = require('./ruisi-callback-client');
 const { createNarrationSessionManager } = require('./narration/narration-session-manager');
 const { isNarrationRequest, validateNarrationCommand } = require('./narration/narration-definitions');
 const { isDynamicQaRequest, validateDynamicQaCommand, createDynamicQaHandler } = require('./dynamic-qa/dynamic-qa-handler');
+const { createExhibitionAuth } = require('./exhibition-auth');
 
 function requestBodyType(body) {
   if (Array.isArray(body)) return '旧数组模式';
@@ -40,6 +41,8 @@ function rejectionReason(error, { bodyType, narration = false, dynamicQa = false
   }
   if (value.includes('language must be one of')) return `params.language不支持，${value}`;
   if (value.includes('narration request must contain')) return '讲解请求必须且只能包含一条讲解指令';
+  if (value.includes('narration exhibitionId is required')) return '讲解会话缺少展厅标识，无法确定目标展厅';
+  if (value.includes('exhibitionId is required to publish')) return '发布IOC指令缺少展厅标识';
   if (value.includes('narration action is not registered')) return '未知讲解指令';
   if (value.includes('action is not registered')) return '未知HC指令';
   if (value.includes('envelope commands must be an array')) return 'commands必须是数组';
@@ -52,7 +55,11 @@ function rejectionReason(error, { bodyType, narration = false, dynamicQa = false
   return `指令校验失败：${value}`;
 }
 
-function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait, dynamicQaGetBusinessDate } = {}) {
+function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait, dynamicQaGetBusinessDate, exhibitionAuth } = {}) {
+  // 不允许存在默认无鉴权的生产构造路径。
+  if (typeof exhibitionAuth !== 'function') {
+    throw new Error('exhibition auth middleware is required');
+  }
   const executor = commandExecutor || createCommandExecutor({ publisher, logger, mqttTopic });
   const sharedCallbackClient = callbackClient || createRuisiCallbackClient({ logger });
   const manager = narrationManager || createNarrationSessionManager({
@@ -90,11 +97,18 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
     res.status(200).json({ ok: true, mqttConnected, status: mqttConnected ? 'ready' : 'mqtt_unavailable' });
   });
 
-  app.post('/api/commands', async (req, res) => {
+  app.post('/api/commands', exhibitionAuth, async (req, res) => {
     const bodyType = requestBodyType(req.body);
     logger.info('[RUISI/OSCA→执行器] 收到指令请求', {
-      requestId: req.requestId, method: req.method, path: req.path, contentType: req.get('content-type') || '缺失'
+      requestId: req.requestId, method: req.method, path: req.path,
+      contentType: req.get('content-type') || '缺失', exhibitionId: req.exhibitionId
     });
+    if (req.body && !Array.isArray(req.body) && Object.prototype.hasOwnProperty.call(req.body, 'exhibitionId')) {
+      // 展厅身份只由服务端 Token 映射决定，请求体字段仅记录并忽略。
+      logger.warn('[鉴权] 忽略请求体中的exhibitionId，使用服务端Token映射', {
+        requestId: req.requestId, bodyExhibitionId: String(req.body.exhibitionId), exhibitionId: req.exhibitionId
+      });
+    }
     logger.info('[RUISI/OSCA→执行器] 请求体类型', { requestId: req.requestId, bodyType });
     logger.info('[RUISI/OSCA→执行器] 请求体', { requestId: req.requestId, body: req.body });
 
@@ -131,7 +145,8 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
         requestId: req.requestId, action: receivedCommands[0].action, scenario: narration.definition.scenario, language: narration.language
       });
       const started = manager.startNarration({
-        definition: narration.definition, context: request.context, language: narration.language, requestId: req.requestId
+        definition: narration.definition, context: request.context, language: narration.language,
+        requestId: req.requestId, exhibitionId: req.exhibitionId
       });
       if (!started.ok) {
         return reject(res, { requestId: req.requestId, error: started.error, bodyType, narration: true, stage: 'Narration校验' });
@@ -156,7 +171,9 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
       logger.info('[语义转换] 指令识别为动态问答', {
         requestId: req.requestId, action: dynamicCommand.value.action, language: dynamicCommand.value.language
       });
-      const result = await qaHandler.execute({ command: dynamicCommand.value, context: request.context, requestId: req.requestId });
+      const result = await qaHandler.execute({
+        command: dynamicCommand.value, context: request.context, requestId: req.requestId, exhibitionId: req.exhibitionId
+      });
       if (!result.ok) {
         return reject(res, {
           requestId: req.requestId, error: result.error, bodyType, dynamicQa: true,
@@ -167,7 +184,9 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
     }
 
     logger.info('[指令解析] 识别为普通IOC指令，无需RUISI回程', { requestId: req.requestId });
-    const result = await executor.executeCommandRequest(receivedCommands, { requestId: req.requestId });
+    const result = await executor.executeCommandRequest(receivedCommands, {
+      requestId: req.requestId, exhibitionId: req.exhibitionId
+    });
     if (!result.ok) {
       const reason = rejectionReason(result.error, { bodyType });
       res.locals.rejectionReason = reason;
@@ -192,10 +211,12 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
 function start() {
   const config = loadConfig();
   const logger = createLogger();
+  const exhibitionAuth = createExhibitionAuth({ tokenMap: config.exhibitionTokens, logger });
   logger.info('[执行器] 正在启动练秋湖IOC执行器', {
     port: config.port, mqttEndpoint: sanitizeMqttUrl(config.mqttUrl), mqttTopic: config.mqttTopic,
     narrationDurationScale: config.narrationDurationScale, ruisiCallbackTimeoutMs: config.ruisiCallbackTimeoutMs,
-    ingressAuthState: config.ingressToken ? '已配置' : '未配置'
+    ingressAuthState: config.ingressToken ? '已配置' : '未配置',
+    exhibitionAuthState: '已配置', exhibitionCount: config.exhibitionTokens.size
   });
   const publisher = createMqttPublisher(config, logger);
   const commandExecutor = createCommandExecutor({ publisher, logger, mqttTopic: config.mqttTopic });
@@ -205,7 +226,9 @@ function start() {
   const narrationManager = createNarrationSessionManager({
     commandExecutor, callbackClient, logger, durationScale: config.narrationDurationScale
   });
-  const app = createApp({ publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager, callbackClient });
+  const app = createApp({
+    publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager, callbackClient, exhibitionAuth
+  });
   const server = app.listen(config.port, () => {
     logger.info('[执行器] HTTP服务监听成功', { port: config.port });
   });

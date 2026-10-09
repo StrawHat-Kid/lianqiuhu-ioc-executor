@@ -35,6 +35,7 @@ GET /health
 | `MQTT_URL` / `MQTT_USERNAME` / `MQTT_PASSWORD` / `MQTT_TOPIC` | 必填 MQTT 配置 |
 | `MQTT_QOS` | 当前仅支持 `0` |
 | `MQTT_RETAIN` | 当前仅支持 `false` |
+| `HC_TOKEN_MAP` | 必填。`X-HC-Token` 到 exhibitionId 的服务端映射，格式 `token:exhibitionId[,token:exhibitionId...]`；同一展厅可配置多个 Token 以支持轮换。配置缺失或非法时执行器拒绝启动 |
 | `INGRESS_TOKEN` | 与 RUISI Ingress 共享的可选 secret；配置后 callback 添加 `X-Auth-Token` |
 | `RUISI_CALLBACK_TIMEOUT_MS` | 可选；callback 超时，默认 `5000`ms |
 | `HC_NARRATION_DURATION_SCALE` | 可选；所有讲解段时长倍率，默认 `1`；非法、零或负数回落 `1` |
@@ -60,6 +61,8 @@ HC_NARRATION_DURATION_SCALE=0.1
 园区基础底数讲解额外声明了 `minimumIocHoldMs`，用于保护 UE 园区漫游。其实际保持时间为 `max(durationMs × HC_NARRATION_DURATION_SCALE, minimumIocHoldMs) + postGapMs`；该最小 IOC 保持时间不受倍率影响。综合运行态势、安防实时态势、能源与能效实时态势不设置此下限，仍按 `durationMs × HC_NARRATION_DURATION_SCALE + postGapMs` 执行。
 
 ## `POST /api/commands`
+
+所有请求必须携带 `X-HC-Token`（值来自 `HC_TOKEN_MAP` 中的 Token）。Token 缺失、格式非法或未知时返回 HTTP 401 `{ "ok": false, "error": "unauthorized" }`，且不会发布任何 MQTT 消息。目标展厅只由服务端 Token 映射决定，请求体或 `context` 中的 `exhibitionId` 一律忽略。
 
 接口同时支持 legacy array 与 context envelope。普通指令两种请求的 IOC 结果相同；context 不会写入 MQTT commands。
 
@@ -89,6 +92,23 @@ HC_NARRATION_DURATION_SCALE=0.1
 ```
 
 `context` 会被标准化为不可变副本：`agent`、`replyTo`、`groupchat`、`callback`、`timestamp`。如给出，`agent`、`reply_to`、`callback` 必须为非空字符串；callback 只允许 `http://` / `https://`；`groupchat` 缺失时为 `false`。
+
+## MQTT 出站载荷
+
+执行器向统一 Topic 发布 UTF-8 JSON 信封，所有发布路径（普通指令、语言指令、Narration、动态问答）格式一致：
+
+```json
+{
+  "exhibitionId": "ab12cd34",
+  "commands": [
+    { "action": "主题切换", "params": { "主题名称": "综合安防" } }
+  ]
+}
+```
+
+- `exhibitionId` 来自请求 Token 对应的服务端映射，不由请求体指定。
+- 顶层数组旧格式不再发布；前端必须在调用 Dispatcher 之前校验 `exhibitionId` 并解包 `commands`。
+- QoS 0、retain false 保持不变。
 
 ## Narration：必须使用 envelope
 
@@ -205,7 +225,7 @@ npm start
 npm test
 ```
 
-当前冻结基线预期为 `95 passed, 0 failed`。测试使用 MQTT/mock HTTP server，不依赖真实 RUISI ingress。
+当前冻结基线预期为 `158 passed, 0 failed`。测试使用 MQTT/mock HTTP server，不依赖真实 RUISI ingress。
 
 Git 仓库只包含 `.env.example`，不包含真实 `.env`。本地或产品部署时先复制 `.env.example` 为 `.env`，再由部署人员填写 MQTT、Token 等真实值；`.env` 不得提交到 Git。仓库不应包含 `node_modules`、运行日志、TTS 标定产物、Python 虚拟环境或 IDE 临时文件。
 

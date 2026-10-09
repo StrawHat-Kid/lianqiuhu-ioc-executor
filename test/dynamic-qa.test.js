@@ -10,9 +10,14 @@ const {
 } = require('../src/dynamic-qa/dynamic-qa-handler');
 const { buildDynamicQaAnswer } = require('../src/dynamic-qa/dynamic-qa-answer-builder');
 const { getHcBusinessDate } = require('../src/hc-business-date');
+const { createExhibitionAuth } = require('../src/exhibition-auth');
 const {
   PARK_BASE_OVERVIEW, PARK_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION
 } = require('../src/narration/narration-definitions');
+
+const TEST_TOKEN = 'test-token-0123456789abcdef';
+const TEST_HALL = 'test-hall';
+const publishedCommands = (message) => JSON.parse(message).commands;
 
 function logger() { return { info() {}, warn() {}, error() {} }; }
 function fixedHcBusinessDate() { return { year: 2026, month: 9, day: 8 }; }
@@ -66,14 +71,17 @@ async function post(body, dependencies = {}) {
   const app = createApp({
     publisher: activePublisher, logger: logger(), mqttTopic: 'test/topic', callbackClient: activeCallback,
     dynamicQaWait: dependencies.dynamicQaWait || (async () => {}),
-    dynamicQaGetBusinessDate: dependencies.getBusinessDate || fixedHcBusinessDate
+    dynamicQaGetBusinessDate: dependencies.getBusinessDate || fixedHcBusinessDate,
+    exhibitionAuth: createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger: logger() })
   });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-HC-Token': TEST_TOKEN },
+      body: JSON.stringify(body)
     });
     return { status: response.status, body: await response.json(), publisher: activePublisher, callbackClient: activeCallback };
   } finally {
@@ -234,7 +242,7 @@ test('fixed actions accept language only and do not require a date dimension', (
 test('Chinese electricity HTTP ingress publishes exactly two IOC commands and callbacks the structured answer', async () => {
   const result = await post(envelope('查询累计用电量', { day: 7, language: 'zh-CN' }));
   assert.equal(result.status, 200);
-  assert.deepEqual(JSON.parse(result.publisher.calls[0]), [
+  assert.deepEqual(publishedCommands(result.publisher.calls[0]), [
     { action: 'executeCapability', params: { capability: 'global.language', command: 'set', language: 'zh-CN' } },
     { action: '主题切换', params: { '主题名称': '综合态势' } }
   ]);
@@ -245,7 +253,7 @@ test('Chinese electricity HTTP ingress publishes exactly two IOC commands and ca
 test('English closed-ticket HTTP ingress publishes exactly two IOC commands and callbacks the structured answer', async () => {
   const result = await post(envelope('查询已关闭工单', { month: 9, language: 'en-US' }));
   assert.equal(result.status, 200);
-  assert.deepEqual(JSON.parse(result.publisher.calls[0]), [
+  assert.deepEqual(publishedCommands(result.publisher.calls[0]), [
     { action: 'executeCapability', params: { capability: 'global.language', command: 'set', language: 'en-US' } },
     { action: '主题切换', params: { '主题名称': '综合态势' } }
   ]);
@@ -255,7 +263,8 @@ test('English closed-ticket HTTP ingress publishes exactly two IOC commands and 
 test('language aliases normalize the actual IOC command and callback answer', async () => {
   const result = await post(envelope('查询年度等效节能', { language: 'en' }));
   assert.equal(result.status, 200);
-  assert.equal(JSON.parse(result.publisher.calls[0])[0].params.language, 'en-US');
+  assert.equal(publishedCommands(result.publisher.calls[0])[0].params.language, 'en-US');
+  assert.equal(JSON.parse(result.publisher.calls[0]).exhibitionId, TEST_HALL);
   assert.equal(result.callbackClient.calls[0].options.body, 'Annual equivalent energy saving is 15.9%.');
 });
 
@@ -274,13 +283,14 @@ test('future energy dynamic QA publishes IOC immediately and callbacks once afte
   const clock = controlledWait();
   const handler = createDynamicQaHandler({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait, getBusinessDate: fixedHcBusinessDate });
   const command = validateDynamicQaCommand({ action: '查询累计用电量', params: { day: 20, language: 'zh-CN' } }).value;
-  const execution = handler.execute({ command, context: normalizedContext(), requestId: 'energy-delay-test' });
+  const execution = handler.execute({ command, context: normalizedContext(), requestId: 'energy-delay-test', exhibitionId: TEST_HALL });
 
   await eventually(() => executor.calls.length === 1 && clock.calls.length === 1);
   assert.deepEqual(executor.calls[0].commands, [
     { action: 'executeCapability', params: { capability: 'global.language', command: 'set', language: 'zh-CN' } },
     { action: '主题切换', params: { '主题名称': '综合态势' } }
   ]);
+  assert.equal(executor.calls[0].meta.exhibitionId, TEST_HALL);
   assert.deepEqual(clock.calls, [HC_INTRO_DELAY_MS]);
   assert.equal(callback.calls.length, 0);
   clock.releaseNext();
@@ -295,7 +305,7 @@ test('future work-order dynamic QA publishes IOC immediately and callbacks once 
   const clock = controlledWait();
   const handler = createDynamicQaHandler({ commandExecutor: executor, callbackClient: callback, logger: logger(), wait: clock.wait, getBusinessDate: fixedHcBusinessDate });
   const command = validateDynamicQaCommand({ action: '查询待处理工单', params: { month: 10, language: 'en-US' } }).value;
-  const execution = handler.execute({ command, context: normalizedContext(), requestId: 'work-order-delay-test' });
+  const execution = handler.execute({ command, context: normalizedContext(), requestId: 'work-order-delay-test', exhibitionId: TEST_HALL });
 
   await eventually(() => executor.calls.length === 1 && clock.calls.length === 1);
   assert.deepEqual(executor.calls[0].commands, [
@@ -347,7 +357,7 @@ test('dynamic QA and all production Narrations share the HC opening delay', () =
 test('ordinary IOC action remains on its existing command path', async () => {
   const result = await post([{ action: '启动园区总览', params: {} }]);
   assert.equal(result.status, 200);
-  assert.deepEqual(JSON.parse(result.publisher.calls[0]), [
+  assert.deepEqual(publishedCommands(result.publisher.calls[0]), [
     { action: '主题切换', params: { '主题名称': '综合态势' } },
     { action: 'executeCapability', params: { capability: 'situation.parkOverview', command: 'start' } }
   ]);

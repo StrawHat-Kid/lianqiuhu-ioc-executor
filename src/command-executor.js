@@ -11,7 +11,14 @@ const {
 const { translateHcCommand } = require('./hc-command-registry');
 
 function createCommandExecutor({ publisher, logger, mqttTopic }) {
-  async function publishFrontendCommands(commands, { semanticRequest = false, source = 'commands', requestId, sessionId } = {}) {
+  async function publishFrontendCommands(commands, { semanticRequest = false, source = 'commands', requestId, sessionId, exhibitionId } = {}) {
+    const hallId = typeof exhibitionId === 'string' ? exhibitionId.trim() : '';
+    if (!hallId) {
+      logger.error('[MQTT] IOC指令发布被拒绝：缺少exhibitionId', {
+        requestId, sessionId, commandCount: commands.length, mqttTopic, source
+      });
+      return { ok: false, status: 500, error: 'exhibitionId is required to publish frontend commands' };
+    }
     const frontendValidationError = validateFrontendCommands(commands);
     if (frontendValidationError) return { ok: false, status: 400, error: frontendValidationError };
     if (!publisher.isConnected()) {
@@ -22,22 +29,22 @@ function createCommandExecutor({ publisher, logger, mqttTopic }) {
     }
     try {
       logger.info('[MQTT] 准备发布IOC指令', {
-        requestId, sessionId, mqttTopic, commandCount: commands.length, semanticRequest, source, commands
+        requestId, sessionId, mqttTopic, exhibitionId: hallId, commandCount: commands.length, semanticRequest, source, commands
       });
-      await publisher.publish(JSON.stringify(commands));
+      await publisher.publish(JSON.stringify({ exhibitionId: hallId, commands }));
       logger.info('[MQTT] IOC指令发布成功', {
-        requestId, sessionId, mqttTopic, commandCount: commands.length, semanticRequest, source
+        requestId, sessionId, mqttTopic, exhibitionId: hallId, commandCount: commands.length, semanticRequest, source
       });
       return { ok: true, status: 200, message: 'commands published' };
     } catch (error) {
       logger.error('[MQTT] IOC指令发布失败', {
-        requestId, sessionId, commandCount: commands.length, semanticRequest, mqttTopic, source, error: error.message
+        requestId, sessionId, commandCount: commands.length, semanticRequest, mqttTopic, exhibitionId: hallId, source, error: error.message
       });
       return { ok: false, status: 500, error: 'mqtt publish failed' };
     }
   }
 
-  async function executeCommandRequest(receivedCommands, { requestId } = {}) {
+  async function executeCommandRequest(receivedCommands, { requestId, exhibitionId } = {}) {
     const semanticRequest = isHcSemanticRequest(receivedCommands);
     const languageAugmentableFrontendRequest = isHcLanguageAugmentableFrontendRequest(receivedCommands);
     const semanticError = semanticRequest ? validateHcSemanticCommands(receivedCommands) : null;
@@ -63,11 +70,11 @@ function createCommandExecutor({ publisher, logger, mqttTopic }) {
       // 语言必须单独发布并完成，不能污染完整 Scenario 的严格匹配业务数组。
       const languageCommands = translateHcCommand({ action: '切换语言', params: { language } });
       const languageResult = await publishFrontendCommands(languageCommands, {
-        semanticRequest, source: 'hc-language', requestId
+        semanticRequest, source: 'hc-language', requestId, exhibitionId
       });
       if (!languageResult.ok) return languageResult;
     }
-    return publishFrontendCommands(commands, { semanticRequest, requestId });
+    return publishFrontendCommands(commands, { semanticRequest, requestId, exhibitionId });
   }
 
   return { executeCommandRequest, publishFrontendCommands };
