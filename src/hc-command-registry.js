@@ -11,6 +11,10 @@ const HC_LANGUAGE_ALIASES = Object.freeze({
 });
 const normalizeHcLanguage = (value) =>
   typeof value === 'string' ? HC_LANGUAGE_ALIASES[value] || null : null;
+const PARK_OPERATION_REPORT_CAPABILITY = 'situation.parkOperationReport';
+const PARK_OPERATION_REPORT_PERIODS = Object.freeze(['lastWeek', 'lastMonth']);
+const normalizeParkOperationReportPeriod = (value) =>
+  typeof value === 'string' && PARK_OPERATION_REPORT_PERIODS.includes(value) ? value : null;
 
 // 来源：当前前端 park-ai Scenario Registry 与 Business Command Registry。
 // OSCA 只传本文件中的中文业务名称；capability、operation、固定参数均不得由 OSCA 覆盖。
@@ -258,6 +262,38 @@ const HC_PARAMETERIZED_REGISTRY = Object.freeze({
     translate: (params) => [command('executeCapability', {
       capability: 'global.language', command: 'set', language: normalizeHcLanguage(params.language)
     })]
+  }),
+  '启动园区历史运营态势报告': Object.freeze({
+    businessName: '园区历史运营态势报告',
+    command: 'start',
+    validateParams: (params) => {
+      if (!params || typeof params !== 'object' || Array.isArray(params)) return false;
+      const names = Object.keys(params);
+      if (names.some((name) => name !== 'period' && name !== 'language')) return false;
+      if (normalizeParkOperationReportPeriod(params.period) === null) return false;
+      return params.language === undefined || normalizeHcLanguage(params.language) !== null;
+    },
+    translate: (params) => [
+      theme('综合态势'),
+      command('executeCapability', {
+        capability: PARK_OPERATION_REPORT_CAPABILITY,
+        command: 'start',
+        period: normalizeParkOperationReportPeriod(params.period)
+      })
+    ]
+  }),
+  '取消园区历史运营态势报告': Object.freeze({
+    businessName: '园区历史运营态势报告',
+    command: 'cancel',
+    validateParams: (params) => {
+      if (!params || typeof params !== 'object' || Array.isArray(params)) return false;
+      const names = Object.keys(params);
+      if (names.some((name) => name !== 'language')) return false;
+      return params.language === undefined || normalizeHcLanguage(params.language) !== null;
+    },
+    translate: () => [command('executeCapability', {
+      capability: PARK_OPERATION_REPORT_CAPABILITY, command: 'cancel'
+    })]
   })
 });
 
@@ -306,5 +342,7 @@ module.exports = {
   createCommandRegistry,
   getHcCommandDefinition,
   normalizeHcLanguage,
-  translateHcCommand
+  translateHcCommand,
+  PARK_OPERATION_REPORT_CAPABILITY,
+  normalizeParkOperationReportPeriod
 };

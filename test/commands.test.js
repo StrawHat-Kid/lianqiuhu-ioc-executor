@@ -710,3 +710,125 @@ test('sanitizeMqttUrl removes MQTT credentials', () => {
   assert.equal(sanitized.includes('sensitive-user'), false);
   assert.equal(sanitized.includes('sensitive-password'), false);
 });
+
+const reportStartAction = '启动园区历史运营态势报告';
+const reportCancelAction = '取消园区历史运营态势报告';
+
+test('历史报告启动指令按周期与语言翻译为冻结的前端指令数组', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [
+    { action: reportStartAction, params: { period: 'lastWeek', language: 'zh-CN' } }
+  ]);
+  assert.equal(response.status, 200);
+  assert.equal(publisher.calls.length, 2);
+  assert.deepEqual(publishedCommands(publisher.calls[0]), [
+    frontendCommand('executeCapability', { capability: 'global.language', command: 'set', language: 'zh-CN' })
+  ]);
+  assert.deepEqual(publishedCommands(publisher.calls[1]), [
+    frontendTheme('综合态势'),
+    frontendCommand('executeCapability', { capability: 'situation.parkOperationReport', command: 'start', period: 'lastWeek' })
+  ]);
+  assert.equal(validateFrontendCommands(publishedCommands(publisher.calls[1])), null);
+});
+
+test('历史报告启动指令支持英文与上月周期，且语言单独前置发布', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [
+    { action: reportStartAction, params: { period: 'lastMonth', language: 'en-US' } }
+  ]);
+  assert.equal(response.status, 200);
+  assert.equal(publisher.calls.length, 2);
+  assert.deepEqual(publishedCommands(publisher.calls[0]), [
+    frontendCommand('executeCapability', { capability: 'global.language', command: 'set', language: 'en-US' })
+  ]);
+  assert.deepEqual(publishedCommands(publisher.calls[1]), [
+    frontendTheme('综合态势'),
+    frontendCommand('executeCapability', { capability: 'situation.parkOperationReport', command: 'start', period: 'lastMonth' })
+  ]);
+});
+
+test('历史报告启动指令不带 language 时只发布业务指令', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [
+    { action: reportStartAction, params: { period: 'lastWeek' } }
+  ]);
+  assert.equal(response.status, 200);
+  assert.equal(publisher.calls.length, 1);
+  assert.deepEqual(publishedCommands(publisher.calls[0]), [
+    frontendTheme('综合态势'),
+    frontendCommand('executeCapability', { capability: 'situation.parkOperationReport', command: 'start', period: 'lastWeek' })
+  ]);
+});
+
+test('历史报告启动指令校验缺失、非法周期与非法语言', async () => {
+  const cases = [
+    { params: {}, reason: /params is invalid/ },
+    { params: { language: 'zh-CN' }, reason: /params is invalid/ },
+    { params: { period: 'lastQuarter' }, reason: /params is invalid/ },
+    { params: { period: 'LASTWEEK' }, reason: /params is invalid/ },
+    { params: { period: 'lastWeek', language: 'fr-FR' }, reason: /params is invalid/ },
+    { params: { period: 'lastWeek', extra: true }, reason: /params is invalid/ }
+  ];
+  for (const { params, reason } of cases) {
+    const publisher = createPublisher();
+    const response = await request(publisher, 'POST', '/api/commands', [{ action: reportStartAction, params }]);
+    assert.equal(response.status, 400, JSON.stringify(params));
+    assert.match(response.body.error, reason);
+    assert.equal(publisher.calls.length, 0);
+  }
+});
+
+test('历史报告启动指令缺少 params 字段时被拒绝', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [{ action: reportStartAction }]);
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /params is required/);
+  assert.equal(publisher.calls.length, 0);
+});
+
+test('历史报告取消指令只发布取消能力，不带周期', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [
+    { action: reportCancelAction, params: { language: 'zh-CN' } }
+  ]);
+  assert.equal(response.status, 200);
+  assert.equal(publisher.calls.length, 2);
+  const business = publishedCommands(publisher.calls[1]);
+  assert.deepEqual(business, [
+    frontendCommand('executeCapability', { capability: 'situation.parkOperationReport', command: 'cancel' })
+  ]);
+  assert.equal(JSON.stringify(business).includes('period'), false);
+});
+
+test('历史报告取消指令拒绝周期参数', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [
+    { action: reportCancelAction, params: { period: 'lastWeek' } }
+  ]);
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /params is invalid/);
+  assert.equal(publisher.calls.length, 0);
+});
+
+test('历史报告指令不改变原有实时运营指令的前端数组', async () => {
+  const publisher = createPublisher();
+  const response = await request(publisher, 'POST', '/api/commands', [
+    { action: '启动园区实时运营情况', params: { language: 'zh-CN' } }
+  ]);
+  assert.equal(response.status, 200);
+  assert.deepEqual(publishedCommands(publisher.calls[1]), [
+    frontendTheme('综合态势'),
+    frontendCommand('executeCapability', { capability: 'situation.parkRealTimeOperation', command: 'start' })
+  ]);
+});
+
+test('历史报告指令已注册且 period 只由执行器归一化', () => {
+  assert.ok(HC_COMMAND_REGISTRY[reportStartAction]);
+  assert.ok(HC_COMMAND_REGISTRY[reportCancelAction]);
+  assert.equal(HC_COMMAND_REGISTRY[reportStartAction].command, 'start');
+  assert.equal(HC_COMMAND_REGISTRY[reportCancelAction].command, 'cancel');
+  const startCommands = HC_COMMAND_REGISTRY[reportStartAction].translate({ period: 'lastMonth', language: 'en-US' });
+  assert.equal(startCommands.at(-1).params.period, 'lastMonth');
+  assert.equal(Object.prototype.hasOwnProperty.call(startCommands.at(-1).params, 'language'), false);
+});
+
