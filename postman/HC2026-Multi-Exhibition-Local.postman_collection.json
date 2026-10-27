@@ -1,0 +1,351 @@
+{
+  "info": {
+    "_postman_id": "6f2a1c9e-8d4b-4f7a-9c31-8e2d5a7b9f01",
+    "name": "HC2026 Multi-Exhibition Local",
+    "description": "练秋湖 HC2026 多展厅统一执行器本地联调集合。\n\n前置条件：\n1. 导入配套 Environment：HC2026-Multi-Exhibition-Local.postman_environment.json。\n2. 执行器已按 .env 配置 HC_TOKEN_MAP（本地测试映射 A/B/C）并已启动（本集合不会自动启动服务）。\n3. MQTT 信封内容无法由 Postman 验证，必须按 README 使用 MQTTX 观察。\n\n安全说明：集合中的 Token 全部来自环境变量，均为本地测试值，禁止用于正式环境。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 有效 Token 普通命令",
+      "item": [
+        {
+          "name": "A - 有效 Token 普通命令",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenA}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  { \"action\": \"主题切换\", \"params\": { \"主题名称\": \"综合安防\" } }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "使用 A 展厅 Token 发送普通 IOC 指令。预期 HTTP 200，MQTTX 应看到 exhibitionId 为 HC-A7K9P2 的信封。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('message=commands published', () => pm.expect(json.message).to.eql('commands published'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "B - 有效 Token 普通命令",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenB}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  { \"action\": \"主题切换\", \"params\": { \"主题名称\": \"综合安防\" } }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "使用 B 展厅 Token 发送普通 IOC 指令。预期 HTTP 200，MQTTX 应看到 exhibitionId 为 HC-B4M8Q1 的信封。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('message=commands published', () => pm.expect(json.message).to.eql('commands published'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "C - 有效 Token 普通命令",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenC}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  { \"action\": \"主题切换\", \"params\": { \"主题名称\": \"综合安防\" } }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "使用 C 展厅 Token 发送普通 IOC 指令。预期 HTTP 200，MQTTX 应看到 exhibitionId 为 HC-C6N3R5 的信封。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('message=commands published', () => pm.expect(json.message).to.eql('commands published'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 鉴权失败",
+      "item": [
+        {
+          "name": "缺少 Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  { \"action\": \"主题切换\", \"params\": { \"主题名称\": \"综合安防\" } }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "不发送 X-HC-Token。预期 HTTP 401，且 MQTTX 不应出现任何业务消息。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=false', () => pm.expect(json.ok).to.eql(false));",
+                  "pm.test('error=unauthorized', () => pm.expect(json.error).to.eql('unauthorized'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "未知 Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenUnknown}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  { \"action\": \"主题切换\", \"params\": { \"主题名称\": \"综合安防\" } }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "使用未配置的虚构 Token。预期 HTTP 401，且 MQTTX 不应出现任何业务消息。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=false', () => pm.expect(json.ok).to.eql(false));",
+                  "pm.test('error=unauthorized', () => pm.expect(json.error).to.eql('unauthorized'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 伪造展厅（需 MQTTX 复核）",
+      "item": [
+        {
+          "name": "A Token + 伪造 B exhibitionId",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenA}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"exhibitionId\": \"{{exhibitionIdB}}\",\n  \"commands\": [\n    { \"action\": \"主题切换\", \"params\": { \"主题名称\": \"综合安防\" } }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "入站接口只支持数组或 {context, commands} 信封；顶层 exhibitionId 不是受支持字段，会被执行器忽略并记录告警。服务端必须按 A Token 映射为 HC-A7K9P2。Postman 无法验证 MQTT 内容，必须用 MQTTX 确认信封 exhibitionId 为 HC-A7K9P2，不得出现 HC-B4M8Q1。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('服务端映射应为 A：请用 MQTTX 核对信封 exhibitionId=HC-A7K9P2', () => { pm.expect(json.ok).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 健康检查",
+      "item": [
+        {
+          "name": "健康检查（无需 Token）",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "探活接口不需要 Token。mqttConnected=true 且 status=ready 表示 MQTT 已连接；mqtt_unavailable 表示 MQTT 未连接。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('status is ready or mqtt_unavailable', () => pm.expect(['ready', 'mqtt_unavailable']).to.include(json.status));",
+                  "pm.test('mqttConnected is boolean', () => pm.expect(typeof json.mqttConnected).to.eql('boolean'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Narration（需 MQTTX 观察异步信封）",
+      "item": [
+        {
+          "name": "Narration A - 讲解园区基础信息",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenA}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"agent\": \"hc-local-agent-a\",\n    \"reply_to\": \"hc-local-user-a@example.com\",\n    \"groupchat\": false,\n    \"callback\": \"http://127.0.0.1:29876/agent/send\"\n  },\n  \"commands\": [\n    { \"action\": \"讲解园区基础信息\", \"params\": { \"language\": \"zh-CN\" } }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "Narration 必须使用 {context, commands} 信封且 context 至少包含 agent、reply_to、callback。预期 HTTP 202 并返回 sessionId。后台会话会持续数十秒并向 MQTT 发布多条信封（prepare/start/终态清理），必须用 MQTTX 观察 exhibitionId=HC-A7K9P2。callback 为本地占位地址，不可达不会阻断会话。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('message=narration accepted', () => pm.expect(json.message).to.eql('narration accepted'));",
+                  "pm.test('sessionId present', () => pm.expect(json.sessionId).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Narration B - 讲解园区基础信息",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-HC-Token", "value": "{{tokenB}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"agent\": \"hc-local-agent-b\",\n    \"reply_to\": \"hc-local-user-b@example.com\",\n    \"groupchat\": false,\n    \"callback\": \"http://127.0.0.1:29876/agent/send\"\n  },\n  \"commands\": [\n    { \"action\": \"讲解园区基础信息\", \"params\": { \"language\": \"zh-CN\" } }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/commands",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "commands"]
+            },
+            "description": "B 展厅 Narration。可在 A Narration 进行中发送，用于验证按展厅隔离：A 不应收到 cancel 信封，B 的信封 exhibitionId 必须为 HC-B4M8Q1。必须用 MQTTX 观察，Postman 无法验证 MQTT 内容。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const json = pm.response.json();",
+                  "pm.test('ok=true', () => pm.expect(json.ok).to.eql(true));",
+                  "pm.test('message=narration accepted', () => pm.expect(json.message).to.eql('narration accepted'));",
+                  "pm.test('sessionId present', () => pm.expect(json.sessionId).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8008",
+      "type": "string"
+    }
+  ]
+}

@@ -67,7 +67,9 @@ const validEnv = {
   MQTT_TOPIC: 'lianqiuhu/ioc/demo/commands',
   MQTT_QOS: '0',
   MQTT_RETAIN: 'false',
-  HC_TOKEN_MAP: `${TEST_TOKEN}:${TEST_HALL}`
+  HC_TOKEN_MAP: `${TEST_TOKEN}:${TEST_HALL}`,
+  HC_HALL_TEST_HALL_AGENT: 'trusted-agent',
+  HC_HALL_TEST_HALL_CALLBACK_ALLOWLIST: 'http://127.0.0.1:29876/agent/send'
 };
 
 test('GET /health returns service status', async () => {
@@ -662,8 +664,24 @@ test('readConfig accepts a valid first-phase configuration', () => {
     port: 8008, mqttUrl: validEnv.MQTT_URL, mqttUsername: validEnv.MQTT_USERNAME,
     mqttPassword: validEnv.MQTT_PASSWORD, mqttTopic: validEnv.MQTT_TOPIC,
     mqttQos: 0, mqttRetain: false, ingressToken: undefined, ruisiCallbackTimeoutMs: 5000, narrationDurationScale: 1,
-    exhibitionTokens: new Map([[TEST_TOKEN, TEST_HALL]])
+    exhibitionTokens: new Map([[TEST_TOKEN, TEST_HALL]]),
+    exhibitionHalls: new Map([[TEST_HALL, {
+      exhibitionId: TEST_HALL,
+      agent: 'trusted-agent',
+      callbackAllowlist: ['http://127.0.0.1:29876/agent/send'],
+      ingressToken: undefined
+    }]])
   });
+});
+
+test('readConfig requires callback binding for every mapped exhibition and no cross-hall fallback', () => {
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_AGENT: '' }), /HC_HALL_TEST_HALL_AGENT/);
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_CALLBACK_ALLOWLIST: '' }), /CALLBACK_ALLOWLIST/);
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_CALLBACK_ALLOWLIST: 'file:///tmp/x' }), /http/);
+  const config = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: 'hall-token' });
+  assert.equal(config.exhibitionHalls.get(TEST_HALL).ingressToken, 'hall-token');
+  const fallback = readConfig({ ...validEnv, INGRESS_TOKEN: 'global-token' });
+  assert.equal(fallback.exhibitionHalls.get(TEST_HALL).ingressToken, 'global-token');
 });
 
 test('readConfig requires a valid HC_TOKEN_MAP and does not fall back to no auth', () => {

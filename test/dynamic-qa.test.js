@@ -11,6 +11,7 @@ const {
 const { buildDynamicQaAnswer } = require('../src/dynamic-qa/dynamic-qa-answer-builder');
 const { getHcBusinessDate } = require('../src/hc-business-date');
 const { createExhibitionAuth } = require('../src/exhibition-auth');
+const { createHallBinder } = require('../src/hall-binding');
 const {
   PARK_BASE_OVERVIEW, PARK_REALTIME_NARRATION, SECURITY_REALTIME_NARRATION, ENERGY_REALTIME_NARRATION
 } = require('../src/narration/narration-definitions');
@@ -18,6 +19,19 @@ const {
 const TEST_TOKEN = 'test-token-0123456789abcdef';
 const TEST_HALL = 'test-hall';
 const publishedCommands = (message) => JSON.parse(message).commands;
+
+
+function testHallBinder(allowlist = ['http://127.0.0.1:29876/agent/send'], agent = 'trusted-agent') {
+  return createHallBinder({
+    halls: new Map([[TEST_HALL, {
+      exhibitionId: TEST_HALL,
+      agent,
+      callbackAllowlist: allowlist,
+      ingressToken: undefined
+    }]]),
+    logger: logger()
+  });
+}
 
 function logger() { return { info() {}, warn() {}, error() {} }; }
 function fixedHcBusinessDate() { return { year: 2026, month: 9, day: 8 }; }
@@ -72,7 +86,16 @@ async function post(body, dependencies = {}) {
     publisher: activePublisher, logger: logger(), mqttTopic: 'test/topic', callbackClient: activeCallback,
     dynamicQaWait: dependencies.dynamicQaWait || (async () => {}),
     dynamicQaGetBusinessDate: dependencies.getBusinessDate || fixedHcBusinessDate,
-    exhibitionAuth: createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger: logger() })
+    exhibitionAuth: createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger: logger() }),
+    hallBinder: createHallBinder({
+      halls: new Map([[TEST_HALL, {
+        exhibitionId: TEST_HALL,
+        agent: 'trusted-agent',
+        callbackAllowlist: ['http://127.0.0.1:29876/agent/send'],
+        ingressToken: undefined
+      }]]),
+      logger: logger()
+    })
   });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));

@@ -35,8 +35,11 @@ GET /health
 | `MQTT_URL` / `MQTT_USERNAME` / `MQTT_PASSWORD` / `MQTT_TOPIC` | 必填 MQTT 配置 |
 | `MQTT_QOS` | 当前仅支持 `0` |
 | `MQTT_RETAIN` | 当前仅支持 `false` |
-| `HC_TOKEN_MAP` | 必填。`X-HC-Token` 到 exhibitionId 的服务端映射，格式 `token:exhibitionId[,token:exhibitionId...]`；同一展厅可配置多个 Token 以支持轮换。配置缺失或非法时执行器拒绝启动 |
-| `INGRESS_TOKEN` | 与 RUISI Ingress 共享的可选 secret；配置后 callback 添加 `X-Auth-Token` |
+| `HC_TOKEN_MAP` | 必填。`X-HC-Token` 到 exhibitionId 的服务端映射，格式 `token:exhibitionId[,token:exhibitionId...]`；同一展厅可配置多个 Token 以支持轮换。配置缺失、非法或使用 `example-*` / `REPLACE_WITH_*` / `change-me-*` 占位值时执行器拒绝启动 |
+| `HC_HALL_<展厅>_AGENT` | 必填。该展厅回程使用的可信 Agent；请求 `context.agent` 仅记录，不参与回程 |
+| `HC_HALL_<展厅>_CALLBACK_ALLOWLIST` | 必填。该展厅允许的 callback 目标，逗号分隔的绝对 http(s) URL；按 scheme + host + port + 路径前缀匹配 |
+| `HC_HALL_<展厅>_INGRESS_TOKEN` | 可选。该展厅回程使用的 `X-Auth-Token`；未配置时回退全局 `INGRESS_TOKEN` |
+| `INGRESS_TOKEN` | 与 RUISI Ingress 共享的全局 secret；未配置展厅级 Token 时作为回程凭据 |
 | `RUISI_CALLBACK_TIMEOUT_MS` | 可选；callback 超时，默认 `5000`ms |
 | `HC_NARRATION_DURATION_SCALE` | 可选；所有讲解段时长倍率，默认 `1`；非法、零或负数回落 `1` |
 
@@ -51,6 +54,32 @@ HC_NARRATION_DURATION_SCALE=0.1
 ```
 
 `INGRESS_HOST` 与 `INGRESS_PORT` 只供 `scripts/mock-ruisi-ingress.js`（以及未来 RUISI Ingress 服务）监听使用。Node callback 的目标地址始终来自请求中的 `context.callback`，不会拼接 host/port。`INGRESS_TOKEN` 是 Node 与 Ingress 共享的 secret；正式产品环境必须替换为产品提供的值。`HC_NARRATION_DURATION_SCALE=0.1` 仅用于本地快速联调，正式运行/演示前必须改回 `1`。
+
+### 展厅回程绑定（必填）
+
+`HC_TOKEN_MAP` 中出现的**每个展厅**都必须配置 `HC_HALL_<展厅>_AGENT` 与 `HC_HALL_<展厅>_CALLBACK_ALLOWLIST`，否则执行器拒绝启动。变量名规则：`HC_HALL_` + 展厅 ID 转大写、非字母数字转 `_`。
+
+- 回程 Agent 只取展厅配置；请求 `context.agent` 仅记录，不参与回程。
+- callback 仍由请求 `context.callback` 动态提供（既有 RUISI/OSCA 协议），但必须命中当前展厅 allowlist（scheme + host + port + 路径前缀）；不命中返回 403，且不发布 MQTT、不发起回程。
+- 展厅身份只由 `X-HC-Token` 决定；`context.exhibitionId` 不参与路由。
+- 多个展厅共用同一 callback host/port 时，分别按各自 allowlist 与 Token 映射校验，不依赖 host/port 差异判断展厅身份。
+- `HC_HALL_<展厅>_INGRESS_TOKEN` 可覆盖该展厅的回程凭据；未配置时使用全局 `INGRESS_TOKEN`。
+- 本执行器没有 `HC_HALL_<展厅>_INGRESS_PORT`：回程地址由 RUISI 在 `context.callback` 中给出，端口必须写入该展厅 `CALLBACK_ALLOWLIST`，由 allowlist 按 scheme + host + port + 路径前缀固定，不会被请求体覆盖。
+
+多展厅（A/B/C）配置示例，展厅 ID 以产品提供的 `HC_TOKEN_MAP` 为准：
+
+```dotenv
+HC_TOKEN_MAP=<A展厅Token>:HC-A7K9P2,<B展厅Token>:HC-B4M8Q1,<C展厅Token>:HC-C6N3R5
+HC_HALL_HC_A7K9P2_AGENT=<A展厅可信Agent>
+HC_HALL_HC_A7K9P2_CALLBACK_ALLOWLIST=https://<A展厅回程host>:<A端口>/agent/send
+HC_HALL_HC_A7K9P2_INGRESS_TOKEN=<A展厅回程鉴权Token>
+HC_HALL_HC_B4M8Q1_AGENT=<B展厅可信Agent>
+HC_HALL_HC_B4M8Q1_CALLBACK_ALLOWLIST=https://<B展厅回程host>:<B端口>/agent/send
+HC_HALL_HC_B4M8Q1_INGRESS_TOKEN=<B展厅回程鉴权Token>
+HC_HALL_HC_C6N3R5_AGENT=<C展厅可信Agent>
+HC_HALL_HC_C6N3R5_CALLBACK_ALLOWLIST=https://<C展厅回程host>:<C端口>/agent/send
+HC_HALL_HC_C6N3R5_INGRESS_TOKEN=<C展厅回程鉴权Token>
+```
 
 ### Narration 时长调节
 

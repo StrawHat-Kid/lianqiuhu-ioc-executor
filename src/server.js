@@ -11,6 +11,7 @@ const { createNarrationSessionManager } = require('./narration/narration-session
 const { isNarrationRequest, validateNarrationCommand } = require('./narration/narration-definitions');
 const { isDynamicQaRequest, validateDynamicQaCommand, createDynamicQaHandler } = require('./dynamic-qa/dynamic-qa-handler');
 const { createExhibitionAuth } = require('./exhibition-auth');
+const { createHallBinder } = require('./hall-binding');
 
 function requestBodyType(body) {
   if (Array.isArray(body)) return '旧数组模式';
@@ -32,6 +33,8 @@ function contextSummary(context) {
 
 function rejectionReason(error, { bodyType, narration = false, dynamicQa = false } = {}) {
   const value = String(error || '未知错误');
+  if (value.includes('callback target is not allowed')) return 'callback目标不属于当前展厅允许的回程范围';
+  if (value.includes('exhibition callback configuration is missing')) return '展厅回程配置缺失，无法建立回程通道';
   if (value.includes('missing context.callback')) return 'context.callback缺失，无法建立RUISI回程通道';
   if (value.includes('missing context.agent')) return 'context.agent缺失，无法建立RUISI回程通道';
   if (value.includes('missing context.replyTo')) return 'context.reply_to缺失，无法建立RUISI回程通道';
@@ -55,11 +58,18 @@ function rejectionReason(error, { bodyType, narration = false, dynamicQa = false
   return `指令校验失败：${value}`;
 }
 
-function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait, dynamicQaGetBusinessDate, exhibitionAuth } = {}) {
+function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait, dynamicQaGetBusinessDate, exhibitionAuth, hallBinder } = {}) {
   // 不允许存在默认无鉴权的生产构造路径。
   if (typeof exhibitionAuth !== 'function') {
     throw new Error('exhibition auth middleware is required');
   }
+  const bindHall = typeof hallBinder === 'function'
+    ? hallBinder
+    : hallBinder && typeof hallBinder.bind === 'function'
+      ? hallBinder.bind
+      : ({ context }) => (context
+        ? { ok: false, status: 403, error: 'exhibition callback configuration is missing' }
+        : { ok: false, status: 400, error: 'missing context' });
   const executor = commandExecutor || createCommandExecutor({ publisher, logger, mqttTopic });
   const sharedCallbackClient = callbackClient || createRuisiCallbackClient({ logger });
   const manager = narrationManager || createNarrationSessionManager({
@@ -144,8 +154,15 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
       logger.info('[语义转换] 指令识别为Narration讲解', {
         requestId: req.requestId, action: receivedCommands[0].action, scenario: narration.definition.scenario, language: narration.language
       });
+      const binding = bindHall({ exhibitionId: req.exhibitionId, context: request.context, requestId: req.requestId });
+      if (!binding.ok) {
+        return reject(res, {
+          requestId: req.requestId, error: binding.error, bodyType, narration: true,
+          stage: '回程隔离校验', status: binding.status
+        });
+      }
       const started = manager.startNarration({
-        definition: narration.definition, context: request.context, language: narration.language,
+        definition: narration.definition, context: binding.context, language: narration.language,
         requestId: req.requestId, exhibitionId: req.exhibitionId
       });
       if (!started.ok) {
@@ -171,8 +188,15 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
       logger.info('[语义转换] 指令识别为动态问答', {
         requestId: req.requestId, action: dynamicCommand.value.action, language: dynamicCommand.value.language
       });
+      const binding = bindHall({ exhibitionId: req.exhibitionId, context: request.context, requestId: req.requestId });
+      if (!binding.ok) {
+        return reject(res, {
+          requestId: req.requestId, error: binding.error, bodyType, dynamicQa: true,
+          stage: '回程隔离校验', status: binding.status
+        });
+      }
       const result = await qaHandler.execute({
-        command: dynamicCommand.value, context: request.context, requestId: req.requestId, exhibitionId: req.exhibitionId
+        command: dynamicCommand.value, context: binding.context, requestId: req.requestId, exhibitionId: req.exhibitionId
       });
       if (!result.ok) {
         return reject(res, {
@@ -212,11 +236,13 @@ function start() {
   const config = loadConfig();
   const logger = createLogger();
   const exhibitionAuth = createExhibitionAuth({ tokenMap: config.exhibitionTokens, logger });
+  const hallBinder = createHallBinder({ halls: config.exhibitionHalls, logger });
   logger.info('[执行器] 正在启动练秋湖IOC执行器', {
     port: config.port, mqttEndpoint: sanitizeMqttUrl(config.mqttUrl), mqttTopic: config.mqttTopic,
     narrationDurationScale: config.narrationDurationScale, ruisiCallbackTimeoutMs: config.ruisiCallbackTimeoutMs,
     ingressAuthState: config.ingressToken ? '已配置' : '未配置',
-    exhibitionAuthState: '已配置', exhibitionCount: config.exhibitionTokens.size
+    exhibitionAuthState: '已配置', exhibitionCount: config.exhibitionTokens.size,
+    exhibitionHallCount: config.exhibitionHalls.size
   });
   const publisher = createMqttPublisher(config, logger);
   const commandExecutor = createCommandExecutor({ publisher, logger, mqttTopic: config.mqttTopic });
@@ -227,7 +253,8 @@ function start() {
     commandExecutor, callbackClient, logger, durationScale: config.narrationDurationScale
   });
   const app = createApp({
-    publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager, callbackClient, exhibitionAuth
+    publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager, callbackClient,
+    exhibitionAuth, hallBinder
   });
   const server = app.listen(config.port, () => {
     logger.info('[执行器] HTTP服务监听成功', { port: config.port });

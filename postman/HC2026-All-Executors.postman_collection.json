@@ -1,0 +1,890 @@
+{
+  "info": {
+    "name": "HC2026 Multi-Exhibition All Executors",
+    "description": "HC2026 多展厅 /api/commands 联调集合。所有 Token 使用环境变量占位符，导入后请在本地环境填写真实 Token，禁止提交真实值。Mock/本集合通过不代表真实 RUISI/OSCA/MQTT/产品部署已验收。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [],
+  "item": [
+    {
+      "name": "01 IOC 执行器",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrlIoc}}/health"
+          }
+        },
+        {
+          "name": "A 展厅普通指令",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"主题切换\",\"params\":{\"主题名称\":\"综合安防\"}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        },
+        {
+          "name": "B 展厅普通指令",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenB}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"主题切换\",\"params\":{\"主题名称\":\"综合安防\"}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        },
+        {
+          "name": "C 展厅普通指令",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenC}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"主题切换\",\"params\":{\"主题名称\":\"综合安防\"}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        },
+        {
+          "name": "缺少 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"主题切换\",\"params\":{\"主题名称\":\"综合安防\"}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        },
+        {
+          "name": "未知 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenUnknown}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"主题切换\",\"params\":{\"主题名称\":\"综合安防\"}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        },
+        {
+          "name": "A Token + Body 伪造 B 展厅（预期 MQTT 仍为 A）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"exhibitionId\":\"{{exhibitionIdB}}\",\"commands\":[{\"action\":\"主题切换\",\"params\":{\"主题名称\":\"综合安防\"}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        },
+        {
+          "name": "A 展厅 Narration（异步，需 MQTTX 复核）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"context\":{\"agent\":\"{{exhibitionIdA}}\",\"reply_to\":\"user-a@example.com\",\"groupchat\":false,\"callback\":\"{{iocCallbackA}}\"},\"commands\":[{\"action\":\"讲解园区基础信息\",\"params\":{\"language\":\"zh-CN\"}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlIoc}}/api/commands"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 安防执行器",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrlSecurity}}/health"
+          }
+        },
+        {
+          "name": "A 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI安防智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlSecurity}}/api/commands"
+          }
+        },
+        {
+          "name": "A 重复启动（预期 already running）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI安防智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlSecurity}}/api/commands"
+          }
+        },
+        {
+          "name": "B 启动（与 A 隔离）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenB}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI安防智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlSecurity}}/api/commands"
+          }
+        },
+        {
+          "name": "A 停止（B 不受影响）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"取消园区AI安防智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlSecurity}}/api/commands"
+          }
+        },
+        {
+          "name": "C 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenC}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI安防智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlSecurity}}/api/commands"
+          }
+        },
+        {
+          "name": "未知 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenUnknown}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI安防智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlSecurity}}/api/commands"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 设施执行器",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrlFacility}}/health"
+          }
+        },
+        {
+          "name": "A 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI设施智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlFacility}}/api/commands"
+          }
+        },
+        {
+          "name": "B 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenB}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI设施智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlFacility}}/api/commands"
+          }
+        },
+        {
+          "name": "A 停止",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"取消园区AI设施智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlFacility}}/api/commands"
+          }
+        },
+        {
+          "name": "C 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenC}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI设施智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlFacility}}/api/commands"
+          }
+        },
+        {
+          "name": "未知 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenUnknown}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI设施智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlFacility}}/api/commands"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 能耗执行器",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrlEnergy}}/health"
+          }
+        },
+        {
+          "name": "A 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI能耗智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlEnergy}}/api/commands"
+          }
+        },
+        {
+          "name": "B 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenB}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI能耗智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlEnergy}}/api/commands"
+          }
+        },
+        {
+          "name": "A 停止",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"取消园区AI能耗智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlEnergy}}/api/commands"
+          }
+        },
+        {
+          "name": "C 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenC}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI能耗智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlEnergy}}/api/commands"
+          }
+        },
+        {
+          "name": "未知 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenUnknown}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI能耗智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlEnergy}}/api/commands"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 会议执行器",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrlMeeting}}/health"
+          }
+        },
+        {
+          "name": "A 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI会议智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlMeeting}}/api/commands"
+          }
+        },
+        {
+          "name": "B 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenB}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI会议智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlMeeting}}/api/commands"
+          }
+        },
+        {
+          "name": "A 停止",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"取消园区AI会议智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlMeeting}}/api/commands"
+          }
+        },
+        {
+          "name": "C 启动",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenC}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI会议智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlMeeting}}/api/commands"
+          }
+        },
+        {
+          "name": "未知 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenUnknown}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[{\"action\":\"启动园区AI会议智能体\",\"params\":{}}]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlMeeting}}/api/commands"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 纯问数执行器",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrlData}}/api/health"
+          }
+        },
+        {
+          "name": "A 展厅会话重置（验证回程 Agent/Token）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenA}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"context\":{\"agent\":\"{{exhibitionIdA}}\",\"reply_to\":\"user-a@example.com\",\"groupchat\":false,\"callback\":\"{{dataCallbackA}}\"},\"commands\":[{\"action\":\"AI问答会话重置\",\"params\":{}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlData}}/api/commands"
+          }
+        },
+        {
+          "name": "B 展厅会话重置（与 A 隔离）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenB}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"context\":{\"agent\":\"{{exhibitionIdB}}\",\"reply_to\":\"user-b@example.com\",\"groupchat\":false,\"callback\":\"{{dataCallbackB}}\"},\"commands\":[{\"action\":\"AI问答会话重置\",\"params\":{}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlData}}/api/commands"
+          }
+        },
+        {
+          "name": "未知 Token（预期 401）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-HC-Token",
+                "value": "{{tokenUnknown}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"commands\":[{\"action\":\"AI问答会话重置\",\"params\":{}}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrlData}}/api/commands"
+          }
+        }
+      ]
+    }
+  ]
+}

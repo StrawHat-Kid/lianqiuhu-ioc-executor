@@ -3,6 +3,7 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 const TOKEN_HEADER = 'X-HC-Token';
 const EXHIBITION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{16,512}$/;
+const PLACEHOLDER_TOKEN_PATTERN = /^(?:example-|replace[_-]?with|change[_-]?me)/i;
 
 function parseTokenMap(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') {
@@ -23,6 +24,9 @@ function parseTokenMap(raw) {
     const exhibitionId = value.slice(separator + 1).trim();
     if (!TOKEN_PATTERN.test(token)) {
       throw new Error('HC_TOKEN_MAP contains an invalid token (16-512 chars, no whitespace or comma)');
+    }
+    if (PLACEHOLDER_TOKEN_PATTERN.test(token)) {
+      throw new Error('HC_TOKEN_MAP contains a placeholder token; replace it with a real secret');
     }
     if (!EXHIBITION_ID_PATTERN.test(exhibitionId)) {
       throw new Error('HC_TOKEN_MAP contains an invalid exhibitionId');

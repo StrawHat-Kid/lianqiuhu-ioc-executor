@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { normalizeCommandRequest } = require('../src/command-request');
 const { createApp } = require('../src/server');
 const { createExhibitionAuth } = require('../src/exhibition-auth');
+const { createHallBinder } = require('../src/hall-binding');
 
 const TEST_TOKEN = 'test-token-0123456789abcdef';
 const TEST_HALL = 'test-hall';
@@ -10,6 +11,18 @@ const TEST_HEADERS = { 'Content-Type': 'application/json', 'X-HC-Token': TEST_TO
 
 function testAuth(logger = createLogger()) {
   return createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger });
+}
+
+function testHallBinder(logger = createLogger()) {
+  return createHallBinder({
+    halls: new Map([[TEST_HALL, {
+      exhibitionId: TEST_HALL,
+      agent: 'trusted-agent',
+      callbackAllowlist: ['http://127.0.0.1:29876/agent/send'],
+      ingressToken: undefined
+    }]]),
+    logger
+  });
 }
 
 function createPublisher() {
@@ -33,7 +46,7 @@ function createCaptureLogger() {
 
 async function postCommands(body, { logger = createLogger(), narrationManager } = {}) {
   const publisher = createPublisher();
-  const app = createApp({ publisher, logger, mqttTopic: 'test/topic', narrationManager, exhibitionAuth: testAuth(logger) });
+  const app = createApp({ publisher, logger, mqttTopic: 'test/topic', narrationManager, exhibitionAuth: testAuth(logger), hallBinder: testHallBinder(logger) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });

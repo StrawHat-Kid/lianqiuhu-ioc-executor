@@ -1,5 +1,26 @@
 const dotenv = require('dotenv');
 const { parseTokenMap } = require('./exhibition-auth');
+const { parseCallbackAllowlist } = require('./hall-binding');
+
+function hallEnvPrefix(exhibitionId) {
+  return 'HC_HALL_' + exhibitionId.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+}
+
+function readExhibitionHalls(env, exhibitionTokens) {
+  const halls = new Map();
+  for (const exhibitionId of new Set(exhibitionTokens.values())) {
+    const prefix = hallEnvPrefix(exhibitionId);
+    const agent = String(env[`${prefix}_AGENT`] || '').trim();
+    if (!agent) throw new Error(`missing required environment variable: ${prefix}_AGENT`);
+    const callbackAllowlist = parseCallbackAllowlist(
+      env[`${prefix}_CALLBACK_ALLOWLIST`],
+      `${prefix}_CALLBACK_ALLOWLIST`
+    );
+    const ingressToken = String(env[`${prefix}_INGRESS_TOKEN`] || '').trim() || env.INGRESS_TOKEN || undefined;
+    halls.set(exhibitionId, Object.freeze({ exhibitionId, agent, callbackAllowlist, ingressToken }));
+  }
+  return halls;
+}
 
 function readConfig(env = process.env) {
   const required = ['MQTT_URL', 'MQTT_USERNAME', 'MQTT_PASSWORD', 'MQTT_TOPIC'];
@@ -37,6 +58,7 @@ function readConfig(env = process.env) {
   const narrationDurationScale = Number.isFinite(configuredScale) && configuredScale > 0 ? configuredScale : 1;
   // 鉴权配置无效时必须让启动失败，不能退化成无鉴权模式。
   const exhibitionTokens = parseTokenMap(env.HC_TOKEN_MAP);
+  const exhibitionHalls = readExhibitionHalls(env, exhibitionTokens);
 
   return {
     port,
@@ -49,7 +71,8 @@ function readConfig(env = process.env) {
     ingressToken: env.INGRESS_TOKEN || undefined,
     ruisiCallbackTimeoutMs,
     narrationDurationScale,
-    exhibitionTokens
+    exhibitionTokens,
+    exhibitionHalls
   };
 }
 

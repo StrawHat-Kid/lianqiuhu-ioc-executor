@@ -67,15 +67,16 @@ function createRuisiCallbackClient({ logger, authToken, timeoutMs = DEFAULT_TIME
     else options.signal?.addEventListener('abort', abortFromSession, { once: true });
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const headers = { 'Content-Type': 'application/json' };
-    if (isNonEmptyString(authToken)) headers['X-Auth-Token'] = authToken;
+    const headerToken = isNonEmptyString(context.ingressToken) ? context.ingressToken : authToken;
+    if (isNonEmptyString(headerToken)) headers['X-Auth-Token'] = headerToken;
     const host = callbackHost(message.callback);
     const logDetails = {
       requestId: options.requestId, sessionId: options.sessionId, scenario: options.scenario,
       callback: message.callback, callbackHost: host, agent: message.payload.agent, to: message.payload.to,
       groupchat: message.payload.groupchat, body: message.payload.body,
       segment: options.segmentIndex === undefined ? undefined : `${options.segmentIndex}/${options.segmentCount}`,
-      timeoutMs, ingressAuthState: isNonEmptyString(authToken) ? '已配置' : '未配置',
-      xAuthState: isNonEmptyString(authToken) ? '已携带' : '未携带'
+      timeoutMs, ingressAuthState: isNonEmptyString(headerToken) ? '已配置' : '未配置',
+      xAuthState: isNonEmptyString(headerToken) ? '已携带' : '未携带'
     };
     const startedAt = Date.now();
     log.info('[执行器→RUISI回程] 准备发送消息', logDetails);

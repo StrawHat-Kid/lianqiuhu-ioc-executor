@@ -85,7 +85,13 @@ test('parseTokenMap rejects invalid configuration', () => {
   assert.throws(() => parseTokenMap('bad token 0123456789abcdef:exhibition-a'), /invalid token/);
   assert.throws(() => parseTokenMap(`${TOKEN_A}:bad hall!`), /invalid exhibitionId/);
   assert.throws(() => parseTokenMap(`${TOKEN_A}:${HALL_A},${TOKEN_A}:${HALL_B}`), /duplicate token/);
-  assert.throws(() => parseTokenMap(`${TOKEN_A}:${HALL_A},`), /empty entry/);
+    assert.throws(() => parseTokenMap(`${TOKEN_A}:${HALL_A},`), /empty entry/);
+  });
+
+test('parseTokenMap rejects example and placeholder tokens', () => {
+  assert.throws(() => parseTokenMap('example-token-a-0123456789abcdef:exhibition-a'), /placeholder token/);
+  assert.throws(() => parseTokenMap('REPLACE_WITH_EXHIBITION_A_TOKEN:exhibition-a'), /placeholder token/);
+  assert.throws(() => parseTokenMap('change-me-token-0123456789:exhibition-a'), /placeholder token/);
 });
 
 test('resolveExhibitionId matches exact configured tokens only', () => {
