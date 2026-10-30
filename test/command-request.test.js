@@ -13,13 +13,17 @@ function testAuth(logger = createLogger()) {
   return createExhibitionAuth({ tokenMap: new Map([[TEST_TOKEN, TEST_HALL]]), logger });
 }
 
-function testHallBinder(logger = createLogger()) {
+function testHallBinder(logger = createLogger(), callbackUrl = 'http://127.0.0.1:29876/agent/send') {
+  const url = new URL(callbackUrl);
   return createHallBinder({
     halls: new Map([[TEST_HALL, {
       exhibitionId: TEST_HALL,
       agent: 'trusted-agent',
-      callbackAllowlist: ['http://127.0.0.1:29876/agent/send'],
-      ingressToken: undefined
+      ingressHost: url.hostname,
+      ingressPort: Number(url.port || 80),
+      ingressToken: 'trusted-ingress-token',
+      to: null,
+      ingressUrl: callbackUrl
     }]]),
     logger
   });

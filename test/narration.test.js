@@ -67,13 +67,17 @@ const TEST_HALL = 'test-hall';
 const TEST_HEADERS = { 'Content-Type': 'application/json', 'X-HC-Token': TEST_TOKEN };
 const publishedCommands = (message) => JSON.parse(message).commands;
 
-function testHallBinder(allowlist = ['http://127.0.0.1:29876/agent/send'], agent = 'trusted-agent') {
+function testHallBinder(callbackUrl = 'http://127.0.0.1:29876/agent/send', agent = 'trusted-agent') {
+  const url = new URL(callbackUrl);
   return createHallBinder({
     halls: new Map([[TEST_HALL, {
       exhibitionId: TEST_HALL,
       agent,
-      callbackAllowlist: allowlist,
-      ingressToken: undefined
+      ingressHost: url.hostname,
+      ingressPort: Number(url.port || 80),
+      ingressToken: 'trusted-ingress-token',
+      to: null,
+      ingressUrl: callbackUrl
     }]]),
     logger: logger()
   });
@@ -380,7 +384,7 @@ test('HTTP narration is accepted immediately and full mock callback E2E follows 
   const narrationManager = createNarrationSessionManager({
     commandExecutor: commandExecutorInstance, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: commandExecutorInstance, narrationManager, exhibitionAuth: testAuth(), hallBinder: testHallBinder([ingress.url]) });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: commandExecutorInstance, narrationManager, exhibitionAuth: testAuth(), hallBinder: testHallBinder(ingress.url) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
@@ -443,7 +447,7 @@ test('real fetch ECONNREFUSED still returns HTTP 202, waits, and publishes narra
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient({ timeoutMs: 100 }), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder([callbackUrl]) });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder(callbackUrl) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
@@ -592,7 +596,7 @@ test('HTTP mock E2E sends two park realtime callbacks and only the Step5 MQTT se
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder([ingress.url]) });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder(ingress.url) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
@@ -716,7 +720,7 @@ test('security HTTP mock E2E returns 202 then publishes two callbacks and only S
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder([ingress.url]) });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder(ingress.url) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
@@ -838,7 +842,7 @@ test('energy HTTP mock E2E returns 202 then publishes two callbacks and only Ste
   const manager = createNarrationSessionManager({
     commandExecutor: executor, callbackClient: createRuisiCallbackClient(), logger: logger(), wait: clock.wait
   });
-  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder([ingress.url]) });
+  const app = createApp({ publisher, logger: logger(), mqttTopic: 'test/topic', commandExecutor: executor, narrationManager: manager, exhibitionAuth: testAuth(), hallBinder: testHallBinder(ingress.url) });
   const server = await new Promise((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });

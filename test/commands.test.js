@@ -69,7 +69,9 @@ const validEnv = {
   MQTT_RETAIN: 'false',
   HC_TOKEN_MAP: `${TEST_TOKEN}:${TEST_HALL}`,
   HC_HALL_TEST_HALL_AGENT: 'trusted-agent',
-  HC_HALL_TEST_HALL_CALLBACK_ALLOWLIST: 'http://127.0.0.1:29876/agent/send'
+  HC_HALL_TEST_HALL_INGRESS_HOST: '127.0.0.1',
+  HC_HALL_TEST_HALL_INGRESS_PORT: '29876',
+  HC_HALL_TEST_HALL_INGRESS_TOKEN: 'trusted-ingress-token'
 };
 
 test('GET /health returns service status', async () => {
@@ -663,25 +665,42 @@ test('readConfig accepts a valid first-phase configuration', () => {
   assert.deepEqual(readConfig(validEnv), {
     port: 8008, mqttUrl: validEnv.MQTT_URL, mqttUsername: validEnv.MQTT_USERNAME,
     mqttPassword: validEnv.MQTT_PASSWORD, mqttTopic: validEnv.MQTT_TOPIC,
-    mqttQos: 0, mqttRetain: false, ingressToken: undefined, ruisiCallbackTimeoutMs: 5000, narrationDurationScale: 1,
+    mqttQos: 0, mqttRetain: false, ruisiCallbackTimeoutMs: 5000, narrationDurationScale: 1,
     exhibitionTokens: new Map([[TEST_TOKEN, TEST_HALL]]),
     exhibitionHalls: new Map([[TEST_HALL, {
       exhibitionId: TEST_HALL,
       agent: 'trusted-agent',
-      callbackAllowlist: ['http://127.0.0.1:29876/agent/send'],
-      ingressToken: undefined
+      ingressHost: '127.0.0.1',
+      ingressPort: 29876,
+      ingressToken: 'trusted-ingress-token',
+      to: null,
+      ingressUrl: 'http://127.0.0.1:29876/agent/send'
     }]])
   });
 });
 
-test('readConfig requires callback binding for every mapped exhibition and no cross-hall fallback', () => {
+test('readConfig requires complete per-exhibition ingress binding and no cross-hall fallback', () => {
   assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_AGENT: '' }), /HC_HALL_TEST_HALL_AGENT/);
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_CALLBACK_ALLOWLIST: '' }), /CALLBACK_ALLOWLIST/);
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_CALLBACK_ALLOWLIST: 'file:///tmp/x' }), /http/);
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_HOST: '' }), /HC_HALL_TEST_HALL_INGRESS_HOST/);
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '' }), /HC_HALL_TEST_HALL_INGRESS_PORT/);
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '70000' }), /INGRESS_PORT/);
+  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: '' }), /HC_HALL_TEST_HALL_INGRESS_TOKEN/);
   const config = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: 'hall-token' });
   assert.equal(config.exhibitionHalls.get(TEST_HALL).ingressToken, 'hall-token');
-  const fallback = readConfig({ ...validEnv, INGRESS_TOKEN: 'global-token' });
-  assert.equal(fallback.exhibitionHalls.get(TEST_HALL).ingressToken, 'global-token');
+  const legacy = readConfig({
+    ...validEnv,
+    HC_HALL_TEST_HALL_AGENT: '',
+    HC_HALL_TEST_HALL_INGRESS_HOST: '',
+    HC_HALL_TEST_HALL_INGRESS_PORT: '',
+    HC_HALL_TEST_HALL_INGRESS_TOKEN: '',
+    AGENT: 'legacy-agent',
+    INGRESS_HOST: '127.0.0.1',
+    INGRESS_PORT: '29877',
+    INGRESS_TOKEN: 'legacy-token'
+  });
+  assert.equal(legacy.exhibitionHalls.get(TEST_HALL).agent, 'legacy-agent');
+  assert.equal(legacy.exhibitionHalls.get(TEST_HALL).ingressPort, 29877);
+  assert.equal(legacy.exhibitionHalls.get(TEST_HALL).ingressToken, 'legacy-token');
 });
 
 test('readConfig requires a valid HC_TOKEN_MAP and does not fall back to no auth', () => {
@@ -690,9 +709,8 @@ test('readConfig requires a valid HC_TOKEN_MAP and does not fall back to no auth
   assert.throws(() => readConfig({ ...validEnv, HC_TOKEN_MAP: 'broken-entry' }), /format/);
 });
 
-test('readConfig accepts INGRESS_TOKEN and optional RUISI callback timeout', () => {
-  const config = readConfig({ ...validEnv, INGRESS_TOKEN: 'ingress-token', RUISI_CALLBACK_TIMEOUT_MS: '8000' });
-  assert.equal(config.ingressToken, 'ingress-token');
+test('readConfig accepts optional RUISI callback timeout', () => {
+  const config = readConfig({ ...validEnv, RUISI_CALLBACK_TIMEOUT_MS: '8000' });
   assert.equal(config.ruisiCallbackTimeoutMs, 8000);
 });
 

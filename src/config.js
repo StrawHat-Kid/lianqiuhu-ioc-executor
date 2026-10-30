@@ -1,25 +1,106 @@
 const dotenv = require('dotenv');
 const { parseTokenMap } = require('./exhibition-auth');
-const { parseCallbackAllowlist } = require('./hall-binding');
+
+const HALL_ENV_PREFIX = 'HC_HALL_';
+const RUISI_SEND_PATH = '/agent/send';
+
+const nonEmpty = (value) => typeof value === 'string' && value.trim() !== '';
 
 function hallEnvPrefix(exhibitionId) {
-  return 'HC_HALL_' + exhibitionId.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  return HALL_ENV_PREFIX + exhibitionId.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+}
+
+function readHallEntry(env, exhibitionId, allowLegacyFallback) {
+  const prefix = hallEnvPrefix(exhibitionId);
+  const resolve = (suffix, legacyName) => {
+    const scoped = env[`${prefix}_${suffix}`];
+    if (nonEmpty(scoped)) return scoped.trim();
+    if (allowLegacyFallback && legacyName && nonEmpty(env[legacyName])) return env[legacyName].trim();
+    return '';
+  };
+
+  const agent = resolve('AGENT', 'AGENT');
+  if (!agent) throw new Error(`missing required environment variable: ${prefix}_AGENT`);
+
+  const ingressHost = resolve('INGRESS_HOST', 'INGRESS_HOST');
+  if (!ingressHost) throw new Error(`missing required environment variable: ${prefix}_INGRESS_HOST`);
+  if (/[\s/:]/.test(ingressHost)) {
+    throw new Error(`${prefix}_INGRESS_HOST must be a hostname or IP address without protocol or path`);
+  }
+
+  const rawPort = resolve('INGRESS_PORT', 'INGRESS_PORT');
+  if (!rawPort) throw new Error(`missing required environment variable: ${prefix}_INGRESS_PORT`);
+  const ingressPort = Number(rawPort);
+  if (!Number.isInteger(ingressPort) || ingressPort < 1 || ingressPort > 65535) {
+    throw new Error(`${prefix}_INGRESS_PORT must be a valid TCP port`);
+  }
+
+  const ingressToken = resolve('INGRESS_TOKEN', 'INGRESS_TOKEN');
+  if (!ingressToken) throw new Error(`missing required environment variable: ${prefix}_INGRESS_TOKEN`);
+
+  const to = resolve('TO', null) || null;
+
+  return Object.freeze({
+    exhibitionId,
+    agent,
+    ingressHost,
+    ingressPort,
+    ingressToken,
+    to,
+    ingressUrl: `http://${ingressHost}:${ingressPort}${RUISI_SEND_PATH}`
+  });
+}
+
+function assertNoHallConflicts(halls) {
+  const seenPrefixes = new Map();
+  for (const exhibitionId of halls.keys()) {
+    const prefix = hallEnvPrefix(exhibitionId);
+    if (seenPrefixes.has(prefix)) {
+      throw new Error(`HC_TOKEN_MAP contains exhibition ids that share the same environment prefix ${prefix}: ${seenPrefixes.get(prefix)} and ${exhibitionId}`);
+    }
+    seenPrefixes.set(prefix, exhibitionId);
+  }
+
+  const seenAgents = new Map();
+  const seenTargets = new Map();
+  for (const hall of halls.values()) {
+    if (seenAgents.has(hall.agent)) {
+      throw new Error(`HC hall config conflict: AGENT is shared by ${seenAgents.get(hall.agent)} and ${hall.exhibitionId}`);
+    }
+    seenAgents.set(hall.agent, hall.exhibitionId);
+
+    const target = `${hall.ingressHost}:${hall.ingressPort}`;
+    if (seenTargets.has(target)) {
+      throw new Error(`HC hall config conflict: ingress target ${target} is shared by ${seenTargets.get(target)} and ${hall.exhibitionId}`);
+    }
+    seenTargets.set(target, hall.exhibitionId);
+  }
 }
 
 function readExhibitionHalls(env, exhibitionTokens) {
+  const hallIds = [...new Set(exhibitionTokens.values())];
+  // 旧版单展厅 AGENT/INGRESS_* 只允许在仅映射一个展厅时作为兼容回退，
+  // 多展厅模式下绝不跨展厅回退。
+  const allowLegacyFallback = hallIds.length === 1;
+
   const halls = new Map();
-  for (const exhibitionId of new Set(exhibitionTokens.values())) {
-    const prefix = hallEnvPrefix(exhibitionId);
-    const agent = String(env[`${prefix}_AGENT`] || '').trim();
-    if (!agent) throw new Error(`missing required environment variable: ${prefix}_AGENT`);
-    const callbackAllowlist = parseCallbackAllowlist(
-      env[`${prefix}_CALLBACK_ALLOWLIST`],
-      `${prefix}_CALLBACK_ALLOWLIST`
-    );
-    const ingressToken = String(env[`${prefix}_INGRESS_TOKEN`] || '').trim() || env.INGRESS_TOKEN || undefined;
-    halls.set(exhibitionId, Object.freeze({ exhibitionId, agent, callbackAllowlist, ingressToken }));
+  for (const exhibitionId of hallIds) {
+    halls.set(exhibitionId, readHallEntry(env, exhibitionId, allowLegacyFallback));
   }
+  assertNoHallConflicts(halls);
   return halls;
+}
+
+function findSharedRecipients(halls) {
+  const groups = new Map();
+  for (const hall of halls.values()) {
+    if (!hall.to) continue;
+    if (!groups.has(hall.to)) groups.set(hall.to, []);
+    groups.get(hall.to).push(hall.exhibitionId);
+  }
+  return [...groups.entries()]
+    .filter(([, exhibitionIds]) => exhibitionIds.length > 1)
+    .map(([recipient, exhibitionIds]) => ({ recipient, exhibitionIds }));
 }
 
 function readConfig(env = process.env) {
@@ -68,7 +149,6 @@ function readConfig(env = process.env) {
     mqttTopic: env.MQTT_TOPIC,
     mqttQos: 0,
     mqttRetain: false,
-    ingressToken: env.INGRESS_TOKEN || undefined,
     ruisiCallbackTimeoutMs,
     narrationDurationScale,
     exhibitionTokens,
@@ -90,4 +170,12 @@ function sanitizeMqttUrl(value) {
   }
 }
 
-module.exports = { loadConfig, readConfig, sanitizeMqttUrl };
+module.exports = {
+  loadConfig,
+  readConfig,
+  readExhibitionHalls,
+  findSharedRecipients,
+  hallEnvPrefix,
+  sanitizeMqttUrl,
+  RUISI_SEND_PATH
+};

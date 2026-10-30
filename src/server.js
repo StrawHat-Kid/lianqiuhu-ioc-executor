@@ -1,6 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const express = require('express');
-const { loadConfig, sanitizeMqttUrl } = require('./config');
+const { loadConfig, sanitizeMqttUrl, findSharedRecipients } = require('./config');
 const { createLogger } = require('./logger');
 const { createMqttPublisher } = require('./mqtt-client');
 const { validateCommands } = require('./validation');
@@ -240,14 +240,23 @@ function start() {
   logger.info('[执行器] 正在启动练秋湖IOC执行器', {
     port: config.port, mqttEndpoint: sanitizeMqttUrl(config.mqttUrl), mqttTopic: config.mqttTopic,
     narrationDurationScale: config.narrationDurationScale, ruisiCallbackTimeoutMs: config.ruisiCallbackTimeoutMs,
-    ingressAuthState: config.ingressToken ? '已配置' : '未配置',
     exhibitionAuthState: '已配置', exhibitionCount: config.exhibitionTokens.size,
-    exhibitionHallCount: config.exhibitionHalls.size
+    exhibitionHallCount: config.exhibitionHalls.size,
+    exhibitionHalls: [...config.exhibitionHalls.values()].map((hall) => ({
+      exhibitionId: hall.exhibitionId,
+      agent: hall.agent,
+      ingressHost: hall.ingressHost,
+      ingressPort: hall.ingressPort,
+      to: hall.to || null
+    }))
   });
+  for (const shared of findSharedRecipients(config.exhibitionHalls)) {
+    logger.warn('[执行器] 多个展厅共用同一回程接收方，请确认产品配置', shared);
+  }
   const publisher = createMqttPublisher(config, logger);
   const commandExecutor = createCommandExecutor({ publisher, logger, mqttTopic: config.mqttTopic });
   const callbackClient = createRuisiCallbackClient({
-    logger, authToken: config.ingressToken, timeoutMs: config.ruisiCallbackTimeoutMs
+    logger, timeoutMs: config.ruisiCallbackTimeoutMs
   });
   const narrationManager = createNarrationSessionManager({
     commandExecutor, callbackClient, logger, durationScale: config.narrationDurationScale

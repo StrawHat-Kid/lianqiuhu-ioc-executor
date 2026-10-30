@@ -21,13 +21,17 @@ const TEST_HALL = 'test-hall';
 const publishedCommands = (message) => JSON.parse(message).commands;
 
 
-function testHallBinder(allowlist = ['http://127.0.0.1:29876/agent/send'], agent = 'trusted-agent') {
+function testHallBinder(callbackUrl = 'http://127.0.0.1:29876/agent/send', agent = 'trusted-agent') {
+  const url = new URL(callbackUrl);
   return createHallBinder({
     halls: new Map([[TEST_HALL, {
       exhibitionId: TEST_HALL,
       agent,
-      callbackAllowlist: allowlist,
-      ingressToken: undefined
+      ingressHost: url.hostname,
+      ingressPort: Number(url.port || 80),
+      ingressToken: 'trusted-ingress-token',
+      to: null,
+      ingressUrl: callbackUrl
     }]]),
     logger: logger()
   });
@@ -91,8 +95,11 @@ async function post(body, dependencies = {}) {
       halls: new Map([[TEST_HALL, {
         exhibitionId: TEST_HALL,
         agent: 'trusted-agent',
-        callbackAllowlist: ['http://127.0.0.1:29876/agent/send'],
-        ingressToken: undefined
+        ingressHost: '127.0.0.1',
+        ingressPort: 29876,
+        ingressToken: 'trusted-ingress-token',
+        to: null,
+        ingressUrl: 'http://127.0.0.1:29876/agent/send'
       }]]),
       logger: logger()
     })

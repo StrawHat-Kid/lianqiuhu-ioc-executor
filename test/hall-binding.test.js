@@ -1,9 +1,7 @@
-const http = require('node:http');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createHallBinder, isCallbackAllowed, parseCallbackAllowlist } = require('../src/hall-binding');
+const { createHallBinder, isTrustedCallback } = require('../src/hall-binding');
 const { createExhibitionAuth } = require('../src/exhibition-auth');
-const { createRuisiCallbackClient } = require('../src/ruisi-callback-client');
 const { createApp } = require('../src/server');
 const { readConfig } = require('../src/config');
 
@@ -15,36 +13,32 @@ const HALL_B = 'hall-b';
 const HALL_C = 'hall-c';
 const CALLBACK_A = 'http://callback-a.example:9000/agent/send';
 const CALLBACK_B = 'http://callback-b.example:9001/agent/send';
-const CALLBACK_C = 'https://callback-c.example:9443/agent/send';
+const CALLBACK_C = 'http://callback-c.example:9002/agent/send';
 const NARRATION = [{ action: '讲解园区基础信息', params: { language: 'zh-CN' } }];
 
 function logger() {
   return { info() {}, warn() {}, error() {} };
 }
 
+function hall(exhibitionId, agent, callback, overrides = {}) {
+  const url = new URL(callback);
+  return {
+    exhibitionId,
+    agent,
+    ingressHost: url.hostname,
+    ingressPort: Number(url.port || 80),
+    ingressToken: `out-token-${exhibitionId}`,
+    to: null,
+    ingressUrl: callback,
+    ...overrides
+  };
+}
+
 function buildHalls(overrides = {}) {
   return new Map([
-    [HALL_A, {
-      exhibitionId: HALL_A,
-      agent: 'trusted-agent-a',
-      callbackAllowlist: [CALLBACK_A],
-      ingressToken: 'out-token-a',
-      ...overrides[HALL_A]
-    }],
-    [HALL_B, {
-      exhibitionId: HALL_B,
-      agent: 'trusted-agent-b',
-      callbackAllowlist: [CALLBACK_B],
-      ingressToken: 'out-token-b',
-      ...overrides[HALL_B]
-    }],
-    [HALL_C, {
-      exhibitionId: HALL_C,
-      agent: 'trusted-agent-c',
-      callbackAllowlist: [CALLBACK_C],
-      ingressToken: 'out-token-c',
-      ...overrides[HALL_C]
-    }]
+    [HALL_A, hall(HALL_A, 'trusted-agent-a', CALLBACK_A, overrides[HALL_A])],
+    [HALL_B, hall(HALL_B, 'trusted-agent-b', CALLBACK_B, overrides[HALL_B])],
+    [HALL_C, hall(HALL_C, 'trusted-agent-c', CALLBACK_C, overrides[HALL_C])]
   ]);
 }
 
@@ -99,28 +93,25 @@ function envelope(callback, agent = 'spoofed-agent') {
   };
 }
 
-test('isCallbackAllowed matches scheme, host, port and path prefix only', () => {
-  assert.equal(isCallbackAllowed(CALLBACK_A, [CALLBACK_A]), true);
-  assert.equal(isCallbackAllowed('https://callback-a.example:9000/agent/send', [CALLBACK_A]), false);
-  assert.equal(isCallbackAllowed('http://other.example:9000/agent/send', [CALLBACK_A]), false);
-  assert.equal(isCallbackAllowed('http://callback-a.example:9001/agent/send', [CALLBACK_A]), false);
-  assert.equal(isCallbackAllowed('http://callback-a.example:9000/agent/send/extra', [CALLBACK_A]), true);
-  assert.equal(isCallbackAllowed('http://callback-a.example:9000/agent/send2', [CALLBACK_A]), false);
-  assert.equal(isCallbackAllowed('http://callback-a.example:9000/other', [CALLBACK_A]), false);
-  assert.equal(isCallbackAllowed('http://callback-a.example/agent/send', ['http://callback-a.example:80/agent/send']), true);
-  assert.equal(isCallbackAllowed('http://callback-a.example:9000/agent/send', []), false);
-  assert.equal(isCallbackAllowed('not-a-url', [CALLBACK_A]), false);
+test('isTrustedCallback matches exactly http + configured host + port + /agent/send', () => {
+  const target = hall(HALL_A, 'trusted-agent-a', CALLBACK_A);
+  assert.equal(isTrustedCallback(CALLBACK_A, target), true);
+  assert.equal(isTrustedCallback('https://callback-a.example:9000/agent/send', target), false);
+  assert.equal(isTrustedCallback('http://other.example:9000/agent/send', target), false);
+  assert.equal(isTrustedCallback('http://callback-a.example:9001/agent/send', target), false);
+  assert.equal(isTrustedCallback('http://callback-a.example:9000/agent/send/extra', target), false);
+  assert.equal(isTrustedCallback('http://callback-a.example:9000/other', target), false);
+  assert.equal(isTrustedCallback('file:///tmp/x', target), false);
+  assert.equal(isTrustedCallback('not-a-url', target), false);
+  assert.equal(isTrustedCallback('', target), false);
+  assert.equal(isTrustedCallback(CALLBACK_A, null), false);
+  assert.equal(
+    isTrustedCallback('http://callback-a.example/agent/send', hall(HALL_A, 'a', 'http://callback-a.example/agent/send')),
+    true
+  );
 });
 
-test('parseCallbackAllowlist rejects empty and non-http entries', () => {
-  assert.throws(() => parseCallbackAllowlist('', 'ALLOW'), /at least one/);
-  assert.throws(() => parseCallbackAllowlist(undefined, 'ALLOW'), /at least one/);
-  assert.throws(() => parseCallbackAllowlist('file:///tmp/x', 'ALLOW'), /http/);
-  assert.throws(() => parseCallbackAllowlist(`${CALLBACK_A},`, 'ALLOW'), /empty entry/);
-  assert.deepEqual([...parseCallbackAllowlist(` ${CALLBACK_A} `, 'ALLOW')], [CALLBACK_A]);
-});
-
-test('binder replaces context.agent with the trusted hall agent and its ingress token', () => {
+test('binder replaces context.agent, pins callback and applies the trusted ingress token', () => {
   const binder = createHallBinder({ halls: buildHalls(), logger: logger() });
   const result = binder.bind({
     exhibitionId: HALL_A,
@@ -128,7 +119,28 @@ test('binder replaces context.agent with the trusted hall agent and its ingress 
   });
   assert.equal(result.ok, true);
   assert.equal(result.context.agent, 'trusted-agent-a');
-  assert.equal(result.context.ingressToken, 'out-token-a');
+  assert.equal(result.context.callback, CALLBACK_A);
+  assert.equal(result.context.ingressToken, 'out-token-hall-a');
+  assert.equal(result.context.replyTo, 'u');
+});
+
+test('binder uses the configured TO recipient only when context.reply_to is missing', () => {
+  const binder = createHallBinder({
+    halls: buildHalls({ [HALL_A]: { to: 'fixed-recipient@example.net' } }),
+    logger: logger()
+  });
+  const missingReplyTo = binder.bind({
+    exhibitionId: HALL_A,
+    context: { replyTo: '', callback: CALLBACK_A }
+  });
+  assert.equal(missingReplyTo.ok, true);
+  assert.equal(missingReplyTo.context.replyTo, 'fixed-recipient@example.net');
+
+  const explicitReplyTo = binder.bind({
+    exhibitionId: HALL_A,
+    context: { replyTo: 'user@example.com', callback: CALLBACK_A }
+  });
+  assert.equal(explicitReplyTo.context.replyTo, 'user@example.com');
 });
 
 test('binder is fail-closed for missing context, missing callback, unknown hall and disallowed target', () => {
@@ -144,21 +156,25 @@ test('binder is fail-closed for missing context, missing callback, unknown hall 
   assert.equal(binder.bind({ exhibitionId: 'other-hall', context: { callback: CALLBACK_A } }).status, 403);
   const crossHall = binder.bind({ exhibitionId: HALL_A, context: { callback: CALLBACK_B } });
   assert.deepEqual(crossHall, { ok: false, status: 403, error: 'callback target is not allowed for this exhibition' });
+  const pathTrick = binder.bind({ exhibitionId: HALL_A, context: { callback: `${CALLBACK_A}/extra` } });
+  assert.equal(pathTrick.status, 403);
 });
 
-test('A/B tokens use their own agent and reject the other hall callback target', async () => {
+test('A/B tokens use their own agent, ingress token and reject the other hall callback target', async () => {
   const started = [];
   const { app } = buildApp({ started });
 
   const acceptedA = await postCommands(app, envelope(CALLBACK_A), TOKEN_A);
   assert.equal(acceptedA.status, 202);
   assert.equal(started[0].context.agent, 'trusted-agent-a');
-  assert.equal(started[0].context.ingressToken, 'out-token-a');
+  assert.equal(started[0].context.ingressToken, 'out-token-hall-a');
+  assert.equal(started[0].context.callback, CALLBACK_A);
 
   const acceptedB = await postCommands(app, envelope(CALLBACK_B), TOKEN_B);
   assert.equal(acceptedB.status, 202);
   assert.equal(started[1].context.agent, 'trusted-agent-b');
-  assert.equal(started[1].context.ingressToken, 'out-token-b');
+  assert.equal(started[1].context.ingressToken, 'out-token-hall-b');
+  assert.equal(started[1].context.callback, CALLBACK_B);
 
   const crossA = await postCommands(app, envelope(CALLBACK_B), TOKEN_A);
   assert.equal(crossA.status, 403);
@@ -170,7 +186,7 @@ test('A/B tokens use their own agent and reject the other hall callback target',
   assert.equal(started.length, 2);
 });
 
-test('A/B/C tokens concurrently bind their own agent, callback port and ingress token', async () => {
+test('A/B/C tokens concurrently bind their own agent, ingress host/port and ingress token', async () => {
   const started = [];
   const { app } = buildApp({ started });
 
@@ -183,18 +199,42 @@ test('A/B/C tokens concurrently bind their own agent, callback port and ingress 
 
   const byAgent = new Map(started.map((item) => [item.context.agent, item.context]));
   assert.equal(byAgent.get('trusted-agent-a').callback, CALLBACK_A);
-  assert.equal(byAgent.get('trusted-agent-a').ingressToken, 'out-token-a');
+  assert.equal(byAgent.get('trusted-agent-a').ingressToken, 'out-token-hall-a');
   assert.equal(byAgent.get('trusted-agent-b').callback, CALLBACK_B);
-  assert.equal(byAgent.get('trusted-agent-b').ingressToken, 'out-token-b');
+  assert.equal(byAgent.get('trusted-agent-b').ingressToken, 'out-token-hall-b');
   assert.equal(byAgent.get('trusted-agent-c').callback, CALLBACK_C);
-  assert.equal(byAgent.get('trusted-agent-c').ingressToken, 'out-token-c');
+  assert.equal(byAgent.get('trusted-agent-c').ingressToken, 'out-token-hall-c');
 
   const crossHall = await postCommands(app, envelope(CALLBACK_C), TOKEN_B);
   assert.equal(crossHall.status, 403);
   assert.equal(started.length, 3);
 });
 
-test('readConfig fails closed when any mapped exhibition lacks hall binding', () => {
+test('body exhibitionId, context agent and callback cannot override token-derived identity', async () => {
+  const started = [];
+  const { app } = buildApp({ started });
+
+  const spoofed = await postCommands(app, {
+    exhibitionId: HALL_A,
+    context: {
+      exhibitionId: HALL_A,
+      agent: 'spoofed-agent',
+      reply_to: 'user@example.com',
+      groupchat: false,
+      callback: CALLBACK_B
+    },
+    commands: NARRATION
+  }, TOKEN_B);
+
+  // Token B wins; callback B is valid for B, body exhibitionId/agent are ignored.
+  assert.equal(spoofed.status, 202);
+  assert.equal(started[0].exhibitionId, HALL_B);
+  assert.equal(started[0].context.agent, 'trusted-agent-b');
+  assert.equal(started[0].context.callback, CALLBACK_B);
+  assert.equal(started[0].context.ingressToken, 'out-token-hall-b');
+});
+
+test('readConfig fails closed when any mapped exhibition lacks ingress binding', () => {
   const base = {
     MQTT_URL: 'mqtts://broker.example:8883',
     MQTT_USERNAME: 'executor',
@@ -204,19 +244,53 @@ test('readConfig fails closed when any mapped exhibition lacks hall binding', ()
     MQTT_RETAIN: 'false',
     HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B},${TOKEN_C}:${HALL_C}`,
     HC_HALL_HALL_A_AGENT: 'trusted-agent-a',
-    HC_HALL_HALL_A_CALLBACK_ALLOWLIST: CALLBACK_A,
+    HC_HALL_HALL_A_INGRESS_HOST: 'callback-a.example',
+    HC_HALL_HALL_A_INGRESS_PORT: '9000',
+    HC_HALL_HALL_A_INGRESS_TOKEN: 'out-token-a',
     HC_HALL_HALL_B_AGENT: 'trusted-agent-b',
-    HC_HALL_HALL_B_CALLBACK_ALLOWLIST: CALLBACK_B
+    HC_HALL_HALL_B_INGRESS_HOST: 'callback-b.example',
+    HC_HALL_HALL_B_INGRESS_PORT: '9001',
+    HC_HALL_HALL_B_INGRESS_TOKEN: 'out-token-b'
   };
   assert.throws(() => readConfig(base), /HC_HALL_HALL_C_AGENT/);
 
   const configured = readConfig({
     ...base,
     HC_HALL_HALL_C_AGENT: 'trusted-agent-c',
-    HC_HALL_HALL_C_CALLBACK_ALLOWLIST: CALLBACK_C
+    HC_HALL_HALL_C_INGRESS_HOST: 'callback-c.example',
+    HC_HALL_HALL_C_INGRESS_PORT: '9002',
+    HC_HALL_HALL_C_INGRESS_TOKEN: 'out-token-c'
   });
   assert.deepEqual([...configured.exhibitionHalls.keys()], [HALL_A, HALL_B, HALL_C]);
   assert.equal(configured.exhibitionHalls.get(HALL_C).agent, 'trusted-agent-c');
+  assert.equal(configured.exhibitionHalls.get(HALL_C).ingressUrl, 'http://callback-c.example:9002/agent/send');
+});
+
+test('readConfig rejects shared agents and shared ingress targets', () => {
+  const base = {
+    MQTT_URL: 'mqtts://broker.example:8883',
+    MQTT_USERNAME: 'executor',
+    MQTT_PASSWORD: 'password',
+    MQTT_TOPIC: 'test/topic',
+    MQTT_QOS: '0',
+    MQTT_RETAIN: 'false',
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
+    HC_HALL_HALL_A_AGENT: 'shared-agent',
+    HC_HALL_HALL_A_INGRESS_HOST: 'callback-a.example',
+    HC_HALL_HALL_A_INGRESS_PORT: '9000',
+    HC_HALL_HALL_A_INGRESS_TOKEN: 'out-token-a',
+    HC_HALL_HALL_B_AGENT: 'shared-agent',
+    HC_HALL_HALL_B_INGRESS_HOST: 'callback-b.example',
+    HC_HALL_HALL_B_INGRESS_PORT: '9001',
+    HC_HALL_HALL_B_INGRESS_TOKEN: 'out-token-b'
+  };
+  assert.throws(() => readConfig(base), /AGENT is shared/);
+  assert.throws(() => readConfig({
+    ...base,
+    HC_HALL_HALL_B_AGENT: 'trusted-agent-b',
+    HC_HALL_HALL_B_INGRESS_HOST: 'callback-a.example',
+    HC_HALL_HALL_B_INGRESS_PORT: '9000'
+  }), /ingress target .*9000.* is shared/);
 });
 
 test('missing, invalid and unmapped tokens are rejected before callback binding', async () => {
@@ -235,32 +309,6 @@ test('normal MQTT commands remain unchanged and do not require callback binding'
   assert.equal(result.status, 200);
   assert.equal(publisher.calls.length, 1);
   assert.equal(JSON.parse(publisher.calls[0]).exhibitionId, HALL_A);
-});
-
-test('per-hall context token overrides the global callback credential', async () => {
-  const requests = [];
-  const server = http.createServer((req, res) => {
-    requests.push({ headers: req.headers, body: '' });
-    req.on('data', () => {});
-    req.on('end', () => res.writeHead(200).end());
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const callback = `http://127.0.0.1:${server.address().port}/agent/send`;
-  try {
-    const client = createRuisiCallbackClient({ authToken: 'global-token', timeoutMs: 1000 });
-    await client.sendAgentMessage(
-      { agent: 'a', replyTo: 'u', groupchat: false, callback, ingressToken: 'hall-token' },
-      { body: 'hello' }
-    );
-    await client.sendAgentMessage(
-      { agent: 'a', replyTo: 'u', groupchat: false, callback },
-      { body: 'hello' }
-    );
-    assert.equal(requests[0].headers['x-auth-token'], 'hall-token');
-    assert.equal(requests[1].headers['x-auth-token'], 'global-token');
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
 });
 
 test('/health stays anonymous', async () => {
