@@ -37,29 +37,30 @@ GET /health
 | `MQTT_QOS` | 当前仅支持 `0` |
 | `MQTT_RETAIN` | 当前仅支持 `false` |
 | `HC_TOKEN_MAP` | 必填。`X-HC-Token` 到 exhibitionId 的映射，格式 `token:exhibitionId[,token:exhibitionId...]`。同一展厅可配置多个 Token 做轮换 |
-| `HC_HALL_<展厅>_AGENT` | 必填。该展厅回程使用的可信 Agent；请求 `context.agent` 一律忽略 |
-| `HC_HALL_<展厅>_INGRESS_HOST` | 必填。该展厅 RUISI 回程主机（仅主机名/IP，不带协议、端口或路径） |
-| `HC_HALL_<展厅>_INGRESS_PORT` | 必填。该展厅 RUISI 回程端口 |
-| `HC_HALL_<展厅>_INGRESS_TOKEN` | 必填。该展厅回程 `X-Auth-Token`；与入站 Token 是两种不同凭据 |
+| `HC_HALL_<展厅>_AGENT` | 回程启用时必填。该展厅回程使用的可信 Agent；请求 `context.agent` 一律忽略 |
+| `HC_HALL_<展厅>_INGRESS_HOST` | 回程启用时必填。该展厅 RUISI 回程主机（仅主机名/IP，不带协议、端口或路径） |
+| `HC_HALL_<展厅>_INGRESS_PORT` | 回程启用时必填。该展厅 RUISI 回程端口 |
+| `HC_HALL_<展厅>_INGRESS_TOKEN` | 回程启用时必填。该展厅回程 `X-Auth-Token`；与入站 Token 是两种不同凭据 |
 | `HC_HALL_<展厅>_TO` | 可选。该展厅接收方兜底 JID，仅当请求缺少 `context.reply_to` 时使用 |
 | `RUISI_CALLBACK_TIMEOUT_MS` | 可选。回程超时，默认 `5000`ms |
 | `HC_NARRATION_DURATION_SCALE` | 可选。Narration 时长倍率，默认 `1` |
 
 变量名规则：`HC_HALL_` + 展厅 ID 转大写、非字母数字转 `_`。例如 `HC-A7K9P2` → `HC_HALL_HC_A7K9P2_*`。
 
-### 展厅回程绑定（必填）
+### 展厅回程绑定
 
-`HC_TOKEN_MAP` 中出现的**每个展厅**都必须提供 `AGENT`、`INGRESS_HOST`、`INGRESS_PORT`、`INGRESS_TOKEN`，否则执行器拒绝启动。
+普通 IOC 指令只依赖 `HC_TOKEN_MAP`，**不依赖**任何回程配置：展厅回程未配置时执行器照常启动、照常发布 MQTT 指令。
 
 - 展厅身份只由 `X-HC-Token` 决定；请求 `context.exhibitionId`、Body `exhibitionId` 都会被忽略并记录告警。
-- 回程 Agent 只取展厅配置，请求 `context.agent` 不能覆盖。
+- 展厅级 `HC_HALL_*` 配置完整时进入隔离模式：回程 Agent 只取展厅配置，请求 `context.agent` 不能覆盖。
 - 回程地址由服务端固定为 `http://<INGRESS_HOST>:<INGRESS_PORT>/agent/send`。
-- 请求仍携带既有的 `context.callback`；只有与上述可信 Ingress 完全一致（`http` + host + port + `/agent/send`）时才放行，否则返回 403，且不会发布 MQTT 或回程。
+- 请求仍携带既有的 `context.callback`；只有与上述可信 Ingress 完全一致（`http` + host + port + `/agent/send`）时才放行，否则返回 403，且不会回程。
 - 实际 POST 目标始终使用服务端可信 URL，不会因为请求 Body 中的 `callback` 而改变。
-- 多展厅模式下任一展厅缺少必需配置都会 fail-closed，不会回退到其他展厅。
-- 不同展厅的 `AGENT` 与 `INGRESS_HOST:PORT` 不得重复，重复会启动失败，避免串展厅。
+- 缺少展厅级配置且存在旧版全局 `INGRESS_HOST` / `INGRESS_PORT` / `INGRESS_TOKEN` 时进入兼容模式：Agent 取请求 `context.agent`，回程地址仍固定为全局 Ingress，行为与早期已验证版本一致。
+- 两者都没有时，该展厅 Narration / 动态问答返回 403（`exhibition callback configuration is missing`），普通指令不受影响。
+- 不同展厅的 `AGENT` 与 `INGRESS_HOST:PORT` 重复只记录告警，不阻断启动；请按产品实际部署修正，避免串展厅。
 - 旧版 `HC_HALL_<展厅>_CALLBACK_ALLOWLIST` 已停用并忽略；请迁移为 `INGRESS_HOST` + `INGRESS_PORT`。
-- 旧版全局 `AGENT` / `INGRESS_HOST` / `INGRESS_PORT` / `INGRESS_TOKEN` 仅当 `HC_TOKEN_MAP` 只映射一个展厅时作为兼容兜底；多展厅模式忽略。
+- 旧版全局 `AGENT` 仅在 `HC_TOKEN_MAP` 只映射一个展厅时作为 Agent 兜底；多展厅模式不会用全局 Agent 覆盖展厅身份。
 
 三个展厅的配置示例（`HC-A7K9P2` / `HC-B4M8Q1` / `HC-C6N3R5`，数量可按产品实际展厅动态增加）：
 

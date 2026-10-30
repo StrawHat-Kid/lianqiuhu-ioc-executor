@@ -51,8 +51,9 @@ HC_HALL_HC_B4M8Q1_TO=<B接收方JID>
 
 - 请求携带的 `context.callback` 只用于一致性校验：必须与上述协议、主机、端口、`/agent/send` 路径完全一致，否则拒绝回程/请求（IOC 返回 403）。
 - 请求中的 `agent`、`exhibitionId`、`callback` 不能覆盖 Token 已确定的展厅配置。
-- 多展厅模式下缺少任一必需配置直接启动失败，不会使用其他展厅配置回退。
-- 不同展厅的 `AGENT` 与 `INGRESS_HOST:PORT` 不得重复，避免串展厅。
+- 回程配置不完整不会阻断执行器启动，也不会阻断普通 IOC 指令发布：仅该展厅的 Narration / 动态问答返回 403，待补齐 `HC_HALL_*` 后恢复。
+- 缺少展厅级配置但存在旧全局 `INGRESS_HOST` / `INGRESS_PORT` / `INGRESS_TOKEN` 时，IOC 进入旧版兼容回程（Agent 取请求 `context.agent`），与早期已验证版本一致；建议尽快补齐展厅级配置。
+- 不同展厅的 `AGENT` 与 `INGRESS_HOST:PORT` 重复只记录告警，不阻断启动；请按产品实际部署修正，避免串展厅。
 - `TO` 可选：IOC 与纯问数都优先使用请求 `context.reply_to`，仅在其缺失时使用 `TO` 兜底。若产品需要固定接收方，请先确认是否会破坏按用户回复的业务语义。
 
 ## 四、IOC 执行器
@@ -73,9 +74,10 @@ HC_HALL_HC_A7K9P2_TO=...
 迁移说明：
 
 - 旧 `HC_HALL_*_CALLBACK_ALLOWLIST` 已停用并忽略，请改为 `INGRESS_HOST` + `INGRESS_PORT` + `INGRESS_TOKEN`。
-- 仅当 `HC_TOKEN_MAP` 只映射一个展厅时，旧全局 `AGENT` / `INGRESS_HOST` / `INGRESS_PORT` / `INGRESS_TOKEN` 才作为兜底；多展厅模式忽略。
-- `INGRESS_HOST` / `INGRESS_PORT` 仍可供本地 `scripts/mock-ruisi-ingress.js` 使用，但不参与正式多展厅可信回程选择。
-- MQTT 单 Topic、消息信封 `exhibitionId`、Narration、动态问答等业务行为不变。
+- 展厅级 `HC_HALL_*` 完整时按展厅隔离回程；缺失时回退到全局 `INGRESS_HOST` / `INGRESS_PORT` / `INGRESS_TOKEN`（旧版兼容），Agent 取请求 `context.agent`。
+- 两者都没有时进程仍可启动并发布普通指令，只是该展厅回程业务返回 403；`/health` 的 `hallBinding` 会显示 `bound` / `isolated` / `legacy` / `callbackDisabled` 数量。
+- `INGRESS_HOST` / `INGRESS_PORT` 仍可供本地 `scripts/mock-ruisi-ingress.js` 使用。
+- MQTT 单 Topic、消息信封 `exhibitionId`（`{ "exhibitionId": "...", "commands": [...] }`）、Narration、动态问答等业务行为不变。
 
 ## 五、纯问数执行器
 
@@ -90,7 +92,9 @@ HC_HALL_HC_A7K9P2_TO=...
 
 - 旧 `config.json` 的 `exhibitions.token_map`、`exhibitions.halls`、`exhibitions.halls.*.callback_token`、`callback_allowlist`、`callback.token` 已停用并忽略；如仍存在，启动日志会告警。
 - 请从 `config.json` 删除旧 `exhibitions` / `callback` 段，避免两套可信配置源。
-- 纯问数业务、模型调用、上下文、会话隔离与回程 Body 格式不变。
+- 模型服务已切换为与本机 OpenCode 一致的 OpenAI-compatible 服务：连接参数使用环境变量 `LLM_PROVIDER` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY`（或 `config.json` 的 `llm` 段）。旧 `deepseek` 段不再提供连接参数，只继承 `system_prompt` 等业务字段。
+- `LLM_API_KEY` 使用部署环境独立签发的 Key，不复用 OpenCode 的登录凭据或内部认证文件；缺失时问答返回明确配置错误，不会回退 DeepSeek。
+- 纯问数业务、Prompt、知识库检索、上下文、会话隔离与回程 Body 格式不变。
 
 ## 六、两个执行器需要的实际参数
 

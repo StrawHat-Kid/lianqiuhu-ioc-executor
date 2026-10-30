@@ -669,22 +669,36 @@ test('readConfig accepts a valid first-phase configuration', () => {
     exhibitionTokens: new Map([[TEST_TOKEN, TEST_HALL]]),
     exhibitionHalls: new Map([[TEST_HALL, {
       exhibitionId: TEST_HALL,
+      mode: 'isolated',
       agent: 'trusted-agent',
       ingressHost: '127.0.0.1',
       ingressPort: 29876,
       ingressToken: 'trusted-ingress-token',
       to: null,
       ingressUrl: 'http://127.0.0.1:29876/agent/send'
-    }]])
+    }]]),
+    exhibitionHallIssues: [],
+    exhibitionHallWarnings: []
   });
 });
 
-test('readConfig requires complete per-exhibition ingress binding and no cross-hall fallback', () => {
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_AGENT: '' }), /HC_HALL_TEST_HALL_AGENT/);
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_HOST: '' }), /HC_HALL_TEST_HALL_INGRESS_HOST/);
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '' }), /HC_HALL_TEST_HALL_INGRESS_PORT/);
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '70000' }), /INGRESS_PORT/);
-  assert.throws(() => readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: '' }), /HC_HALL_TEST_HALL_INGRESS_TOKEN/);
+test('readConfig degrades callback binding instead of blocking startup when per-exhibition config is incomplete', () => {
+  const missingAgent = readConfig({ ...validEnv, HC_HALL_TEST_HALL_AGENT: '' });
+  assert.deepEqual(missingAgent.exhibitionHalls, new Map());
+  assert.match(missingAgent.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_AGENT/);
+
+  const missingHost = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_HOST: '' });
+  assert.match(missingHost.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_INGRESS_HOST/);
+
+  const missingPort = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '' });
+  assert.match(missingPort.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_INGRESS_PORT/);
+
+  const invalidPort = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '70000' });
+  assert.match(invalidPort.exhibitionHallIssues[0].error, /INGRESS_PORT/);
+
+  const missingToken = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: '' });
+  assert.match(missingToken.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_INGRESS_TOKEN/);
+
   const config = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: 'hall-token' });
   assert.equal(config.exhibitionHalls.get(TEST_HALL).ingressToken, 'hall-token');
   const legacy = readConfig({

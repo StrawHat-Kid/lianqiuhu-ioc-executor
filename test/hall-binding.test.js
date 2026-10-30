@@ -234,14 +234,18 @@ test('body exhibitionId, context agent and callback cannot override token-derive
   assert.equal(started[0].context.ingressToken, 'out-token-hall-b');
 });
 
-test('readConfig fails closed when any mapped exhibition lacks ingress binding', () => {
+const BASE_ENV = {
+  MQTT_URL: 'mqtts://broker.example:8883',
+  MQTT_USERNAME: 'executor',
+  MQTT_PASSWORD: 'password',
+  MQTT_TOPIC: 'test/topic',
+  MQTT_QOS: '0',
+  MQTT_RETAIN: 'false'
+};
+
+test('readConfig keeps starting when a mapped exhibition lacks ingress binding', () => {
   const base = {
-    MQTT_URL: 'mqtts://broker.example:8883',
-    MQTT_USERNAME: 'executor',
-    MQTT_PASSWORD: 'password',
-    MQTT_TOPIC: 'test/topic',
-    MQTT_QOS: '0',
-    MQTT_RETAIN: 'false',
+    ...BASE_ENV,
     HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B},${TOKEN_C}:${HALL_C}`,
     HC_HALL_HALL_A_AGENT: 'trusted-agent-a',
     HC_HALL_HALL_A_INGRESS_HOST: 'callback-a.example',
@@ -252,7 +256,12 @@ test('readConfig fails closed when any mapped exhibition lacks ingress binding',
     HC_HALL_HALL_B_INGRESS_PORT: '9001',
     HC_HALL_HALL_B_INGRESS_TOKEN: 'out-token-b'
   };
-  assert.throws(() => readConfig(base), /HC_HALL_HALL_C_AGENT/);
+  const partial = readConfig(base);
+  assert.deepEqual([...partial.exhibitionHalls.keys()], [HALL_A, HALL_B]);
+  assert.deepEqual(partial.exhibitionHallIssues, [
+    { exhibitionId: HALL_C, error: 'missing required environment variable: HC_HALL_HALL_C_INGRESS_HOST' }
+  ]);
+  assert.equal(partial.exhibitionTokens.size, 3);
 
   const configured = readConfig({
     ...base,
@@ -263,17 +272,14 @@ test('readConfig fails closed when any mapped exhibition lacks ingress binding',
   });
   assert.deepEqual([...configured.exhibitionHalls.keys()], [HALL_A, HALL_B, HALL_C]);
   assert.equal(configured.exhibitionHalls.get(HALL_C).agent, 'trusted-agent-c');
+  assert.equal(configured.exhibitionHalls.get(HALL_C).mode, 'isolated');
   assert.equal(configured.exhibitionHalls.get(HALL_C).ingressUrl, 'http://callback-c.example:9002/agent/send');
+  assert.deepEqual(configured.exhibitionHallIssues, []);
 });
 
-test('readConfig rejects shared agents and shared ingress targets', () => {
+test('readConfig reports shared agents and shared ingress targets without blocking startup', () => {
   const base = {
-    MQTT_URL: 'mqtts://broker.example:8883',
-    MQTT_USERNAME: 'executor',
-    MQTT_PASSWORD: 'password',
-    MQTT_TOPIC: 'test/topic',
-    MQTT_QOS: '0',
-    MQTT_RETAIN: 'false',
+    ...BASE_ENV,
     HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
     HC_HALL_HALL_A_AGENT: 'shared-agent',
     HC_HALL_HALL_A_INGRESS_HOST: 'callback-a.example',
@@ -284,13 +290,76 @@ test('readConfig rejects shared agents and shared ingress targets', () => {
     HC_HALL_HALL_B_INGRESS_PORT: '9001',
     HC_HALL_HALL_B_INGRESS_TOKEN: 'out-token-b'
   };
-  assert.throws(() => readConfig(base), /AGENT is shared/);
-  assert.throws(() => readConfig({
+  const sharedAgent = readConfig(base);
+  assert.equal(sharedAgent.exhibitionHalls.size, 2);
+  assert.ok(sharedAgent.exhibitionHallWarnings.some((item) => item.code === 'shared-agent'));
+
+  const sharedTarget = readConfig({
     ...base,
     HC_HALL_HALL_B_AGENT: 'trusted-agent-b',
     HC_HALL_HALL_B_INGRESS_HOST: 'callback-a.example',
     HC_HALL_HALL_B_INGRESS_PORT: '9000'
-  }), /ingress target .*9000.* is shared/);
+  });
+  assert.equal(sharedTarget.exhibitionHalls.size, 2);
+  assert.ok(sharedTarget.exhibitionHallWarnings.some((item) => item.code === 'shared-ingress-target'));
+});
+
+test('legacy single-ingress env keeps ordinary commands and narration working', async () => {
+  const legacy = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
+    INGRESS_HOST: 'ruisi-ingress.example',
+    INGRESS_PORT: '18080',
+    INGRESS_TOKEN: 'legacy-ingress-token'
+  });
+  assert.deepEqual([...legacy.exhibitionHalls.keys()], [HALL_A, HALL_B]);
+  assert.deepEqual(legacy.exhibitionHallIssues, []);
+  assert.equal(legacy.exhibitionHalls.get(HALL_A).mode, 'legacy');
+  assert.equal(legacy.exhibitionHalls.get(HALL_A).agent, null);
+
+  const started = [];
+  const { app, publisher } = buildApp({
+    halls: legacy.exhibitionHalls,
+    started
+  });
+
+  const ordinary = await postCommands(app, [{ action: '切换语言', params: { language: 'en-US' } }], TOKEN_A);
+  assert.equal(ordinary.status, 200);
+  assert.equal(publisher.calls.length, 1);
+  assert.equal(JSON.parse(publisher.calls[0]).exhibitionId, HALL_A);
+
+  const narration = await postCommands(app, envelope('http://ruisi-ingress.example:18080/agent/send', 'agent-a'), TOKEN_B);
+  assert.equal(narration.status, 202);
+  assert.equal(started[0].exhibitionId, HALL_B);
+  assert.equal(started[0].context.agent, 'agent-a');
+  assert.equal(started[0].context.ingressToken, 'legacy-ingress-token');
+
+  const crossHall = await postCommands(app, envelope('http://other-ingress.example:18080/agent/send'), TOKEN_A);
+  assert.equal(crossHall.status, 403);
+});
+
+test('ordinary commands publish even when the hall has no callback configuration', async () => {
+  const unbound = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`
+  });
+  assert.deepEqual([...unbound.exhibitionHalls.keys()], []);
+  assert.equal(unbound.exhibitionHallIssues.length, 2);
+
+  const started = [];
+  const { app, publisher } = buildApp({ halls: unbound.exhibitionHalls, started });
+  const responses = await Promise.all([
+    postCommands(app, [{ action: '切换语言', params: { language: 'zh-CN' } }], TOKEN_A),
+    postCommands(app, [{ action: '切换语言', params: { language: 'en-US' } }], TOKEN_B)
+  ]);
+  assert.deepEqual(responses.map((item) => item.status), [200, 200]);
+  const published = publisher.calls.map((call) => JSON.parse(call).exhibitionId);
+  assert.deepEqual(published.sort(), [HALL_A, HALL_B].sort());
+
+  const narration = await postCommands(app, envelope(CALLBACK_A), TOKEN_A);
+  assert.equal(narration.status, 403);
+  assert.equal(narration.body.error, 'exhibition callback configuration is missing');
+  assert.equal(started.length, 0);
 });
 
 test('missing, invalid and unmapped tokens are rejected before callback binding', async () => {

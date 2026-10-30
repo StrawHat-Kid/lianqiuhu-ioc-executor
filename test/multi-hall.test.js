@@ -237,23 +237,47 @@ test('body exhibitionId and spoofed agent cannot override token-derived hall con
   }
 });
 
-test('missing per-hall config fails closed instead of falling back to another hall', async () => {
+test('missing per-hall config disables only that hall callback and never falls back to another hall', async () => {
   const ingressA = await mockIngress();
   const ingressB = await mockIngress();
   const ingressC = await mockIngress();
   try {
-    assert.throws(
-      () => readConfig(buildEnv(ingressA, ingressB, ingressC, { HC_HALL_HC_C6N3R5_INGRESS_PORT: '' })),
-      /HC_HALL_HC_C6N3R5_INGRESS_PORT/
-    );
-    assert.throws(
-      () => readConfig(buildEnv(ingressA, ingressB, ingressC, { HC_HALL_HC_C6N3R5_INGRESS_TOKEN: '' })),
-      /HC_HALL_HC_C6N3R5_INGRESS_TOKEN/
-    );
-    assert.throws(
-      () => readConfig(buildEnv(ingressA, ingressB, ingressC, { HC_HALL_HC_C6N3R5_AGENT: '' })),
-      /HC_HALL_HC_C6N3R5_AGENT/
-    );
+    for (const [overrides, pattern] of [
+      [{ HC_HALL_HC_C6N3R5_INGRESS_PORT: '' }, /HC_HALL_HC_C6N3R5_INGRESS_PORT/],
+      [{ HC_HALL_HC_C6N3R5_INGRESS_TOKEN: '' }, /HC_HALL_HC_C6N3R5_INGRESS_TOKEN/],
+      [{ HC_HALL_HC_C6N3R5_AGENT: '' }, /HC_HALL_HC_C6N3R5_AGENT/]
+    ]) {
+      const config = readConfig(buildEnv(ingressA, ingressB, ingressC, overrides));
+      assert.deepEqual([...config.exhibitionHalls.keys()], [HALL_A, HALL_B]);
+      assert.equal(config.exhibitionHallIssues.length, 1);
+      assert.equal(config.exhibitionHallIssues[0].exhibitionId, HALL_C);
+      assert.match(config.exhibitionHallIssues[0].error, pattern);
+      assert.equal(config.exhibitionHalls.get(HALL_A).ingressPort, ingressA.port);
+      assert.equal(config.exhibitionHalls.get(HALL_B).ingressPort, ingressB.port);
+    }
+  } finally {
+    await ingressA.close();
+    await ingressB.close();
+    await ingressC.close();
+  }
+});
+
+test('a token whose hall callback is disabled still publishes ordinary IOC commands', async () => {
+  const ingressA = await mockIngress();
+  const ingressB = await mockIngress();
+  const ingressC = await mockIngress();
+  try {
+    const config = readConfig(buildEnv(ingressA, ingressB, ingressC, { HC_HALL_HC_C6N3R5_AGENT: '' }));
+    const { app, publisher } = buildApp(config);
+
+    const ordinary = await post(app, [{ action: '切换语言', params: { language: 'en-US' } }], TOKEN_C);
+    assert.equal(ordinary.status, 200);
+    assert.equal(publisher.calls.length, 1);
+    assert.equal(JSON.parse(publisher.calls[0]).exhibitionId, HALL_C);
+
+    const narration = await post(app, narrationEnvelope(ingressC.url, 'spoofed-agent'), TOKEN_C);
+    assert.equal(narration.status, 403);
+    assert.equal(narration.body.error, 'exhibition callback configuration is missing');
   } finally {
     await ingressA.close();
     await ingressB.close();

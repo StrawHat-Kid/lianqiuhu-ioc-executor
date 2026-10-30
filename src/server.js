@@ -58,7 +58,7 @@ function rejectionReason(error, { bodyType, narration = false, dynamicQa = false
   return `指令校验失败：${value}`;
 }
 
-function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait, dynamicQaGetBusinessDate, exhibitionAuth, hallBinder } = {}) {
+function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationManager, callbackClient, dynamicQaHandler, dynamicQaWait, dynamicQaGetBusinessDate, exhibitionAuth, hallBinder, hallStatus } = {}) {
   // 不允许存在默认无鉴权的生产构造路径。
   if (typeof exhibitionAuth !== 'function') {
     throw new Error('exhibition auth middleware is required');
@@ -104,7 +104,13 @@ function createApp({ publisher, logger, mqttTopic, commandExecutor, narrationMan
 
   app.get('/health', (req, res) => {
     const mqttConnected = publisher.isConnected();
-    res.status(200).json({ ok: true, mqttConnected, status: mqttConnected ? 'ready' : 'mqtt_unavailable' });
+    res.status(200).json({
+      ok: true,
+      mqttConnected,
+      status: mqttConnected ? 'ready' : 'mqtt_unavailable',
+      // 只暴露数量，不暴露展厅 ID/Agent/Token 等配置明细。
+      hallBinding: hallStatus || undefined
+    });
   });
 
   app.post('/api/commands', exhibitionAuth, async (req, res) => {
@@ -237,6 +243,12 @@ function start() {
   const logger = createLogger();
   const exhibitionAuth = createExhibitionAuth({ tokenMap: config.exhibitionTokens, logger });
   const hallBinder = createHallBinder({ halls: config.exhibitionHalls, logger });
+  const hallStatus = {
+    bound: config.exhibitionHalls.size,
+    isolated: [...config.exhibitionHalls.values()].filter((hall) => hall.mode === 'isolated').length,
+    legacy: [...config.exhibitionHalls.values()].filter((hall) => hall.mode === 'legacy').length,
+    callbackDisabled: config.exhibitionHallIssues.length
+  };
   logger.info('[执行器] 正在启动练秋湖IOC执行器', {
     port: config.port, mqttEndpoint: sanitizeMqttUrl(config.mqttUrl), mqttTopic: config.mqttTopic,
     narrationDurationScale: config.narrationDurationScale, ruisiCallbackTimeoutMs: config.ruisiCallbackTimeoutMs,
@@ -244,12 +256,21 @@ function start() {
     exhibitionHallCount: config.exhibitionHalls.size,
     exhibitionHalls: [...config.exhibitionHalls.values()].map((hall) => ({
       exhibitionId: hall.exhibitionId,
+      mode: hall.mode,
       agent: hall.agent,
       ingressHost: hall.ingressHost,
       ingressPort: hall.ingressPort,
       to: hall.to || null
     }))
   });
+  // 普通 IOC 指令不依赖回程配置：这里只降级回程业务（Narration / 动态问答），
+  // 不能让缺失或冲突的回程配置阻断启动与 MQTT 指令发布。
+  for (const issue of config.exhibitionHallIssues) {
+    logger.warn('[执行器] 展厅回程未启用，普通指令仍正常发布，回程业务将返回403', issue);
+  }
+  for (const warning of config.exhibitionHallWarnings) {
+    logger.warn('[执行器] 展厅回程配置告警', warning);
+  }
   for (const shared of findSharedRecipients(config.exhibitionHalls)) {
     logger.warn('[执行器] 多个展厅共用同一回程接收方，请确认产品配置', shared);
   }
@@ -263,7 +284,7 @@ function start() {
   });
   const app = createApp({
     publisher, logger, mqttTopic: config.mqttTopic, commandExecutor, narrationManager, callbackClient,
-    exhibitionAuth, hallBinder
+    exhibitionAuth, hallBinder, hallStatus
   });
   const server = app.listen(config.port, () => {
     logger.info('[执行器] HTTP服务监听成功', { port: config.port });

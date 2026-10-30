@@ -57,15 +57,21 @@ function createHallBinder({ halls, logger } = {}) {
       return { ok: false, status: 403, error: 'callback target is not allowed for this exhibition' };
     }
 
-    if (context.agent && context.agent !== hall.agent) {
+    if (hall.agent && context.agent && context.agent !== hall.agent) {
       log.warn('[回程隔离] 忽略请求中的 context.agent，使用展厅可信 Agent', { requestId, exhibitionId });
+    }
+    // 展厅级 AGENT 未配置（旧版全局回程模式）时沿用请求 Agent，与已验证的旧版行为一致。
+    const agent = hall.agent || context.agent;
+    if (typeof agent !== 'string' || agent.trim() === '') {
+      log.warn('[回程隔离] 展厅缺少可信 Agent 且请求未提供 context.agent，已拒绝', { requestId, exhibitionId });
+      return { ok: false, status: 400, error: 'missing context.agent' };
     }
 
     return {
       ok: true,
       context: Object.freeze({
         ...context,
-        agent: hall.agent,
+        agent,
         replyTo: context.replyTo || hall.to || context.replyTo,
         // 实际回程目标始终使用服务端可信配置，请求中的 callback 只用于一致性校验。
         callback: hall.ingressUrl,
