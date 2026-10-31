@@ -38,9 +38,10 @@ GET /health
 | `MQTT_RETAIN` | 当前仅支持 `false` |
 | `HC_TOKEN_MAP` | 必填。`X-HC-Token` 到 exhibitionId 的映射，格式 `token:exhibitionId[,token:exhibitionId...]`。同一展厅可配置多个 Token 做轮换 |
 | `HC_HALL_<展厅>_AGENT` | 回程启用时必填。该展厅回程使用的可信 Agent；请求 `context.agent` 一律忽略 |
-| `HC_HALL_<展厅>_INGRESS_HOST` | 回程启用时必填。该展厅 RUISI 回程主机（仅主机名/IP，不带协议、端口或路径） |
-| `HC_HALL_<展厅>_INGRESS_PORT` | 回程启用时必填。该展厅 RUISI 回程端口 |
-| `HC_HALL_<展厅>_INGRESS_TOKEN` | 回程启用时必填。该展厅回程 `X-Auth-Token`；与入站 Token 是两种不同凭据 |
+| `HC_HALL_<展厅>_INGRESS_HOST` | 可选。该展厅 RUISI 回程主机（仅主机名/IP，不带协议、端口或路径）；配置后作为可信回程入口 |
+| `HC_HALL_<展厅>_INGRESS_PORT` | 可选。该展厅 RUISI 回程端口；与 `INGRESS_HOST` 成对配置 |
+| `HC_HALL_<展厅>_CALLBACK_ALLOWLIST` | 可选。该展厅允许的回程白名单，逗号分隔的绝对 http(s) URL；沿用 9811796 已验收协议 |
+| `HC_HALL_<展厅>_INGRESS_TOKEN` | 可选。该展厅回程 `X-Auth-Token`；缺省回退全局 `INGRESS_TOKEN` |
 | `HC_HALL_<展厅>_TO` | 可选。该展厅接收方兜底 JID，仅当请求缺少 `context.reply_to` 时使用 |
 | `RUISI_CALLBACK_TIMEOUT_MS` | 可选。回程超时，默认 `5000`ms |
 | `HC_NARRATION_DURATION_SCALE` | 可选。Narration 时长倍率，默认 `1` |
@@ -52,14 +53,13 @@ GET /health
 普通 IOC 指令只依赖 `HC_TOKEN_MAP`，**不依赖**任何回程配置：展厅回程未配置时执行器照常启动、照常发布 MQTT 指令。
 
 - 展厅身份只由 `X-HC-Token` 决定；请求 `context.exhibitionId`、Body `exhibitionId` 都会被忽略并记录告警。
-- 展厅级 `HC_HALL_*` 配置完整时进入隔离模式：回程 Agent 只取展厅配置，请求 `context.agent` 不能覆盖。
-- 回程地址由服务端固定为 `http://<INGRESS_HOST>:<INGRESS_PORT>/agent/send`。
-- 请求仍携带既有的 `context.callback`；只有与上述可信 Ingress 完全一致（`http` + host + port + `/agent/send`）时才放行，否则返回 403，且不会回程。
-- 实际 POST 目标始终使用服务端可信 URL，不会因为请求 Body 中的 `callback` 而改变。
-- 缺少展厅级配置且存在旧版全局 `INGRESS_HOST` / `INGRESS_PORT` / `INGRESS_TOKEN` 时进入兼容模式：Agent 取请求 `context.agent`，回程地址仍固定为全局 Ingress，行为与早期已验证版本一致。
-- 两者都没有时，该展厅 Narration / 动态问答返回 403（`exhibition callback configuration is missing`），普通指令不受影响。
-- 不同展厅的 `AGENT` 与 `INGRESS_HOST:PORT` 重复只记录告警，不阻断启动；请按产品实际部署修正，避免串展厅。
-- 旧版 `HC_HALL_<展厅>_CALLBACK_ALLOWLIST` 已停用并忽略；请迁移为 `INGRESS_HOST` + `INGRESS_PORT`。
+- **回程目标始终使用 RUISI 传入的 `context.callback` 原值**（协议、主机、端口、路径、查询参数都不改写），与 9811796 已验证协议一致。
+- `HC_HALL_*_CALLBACK_ALLOWLIST` 或 `HC_HALL_*_INGRESS_HOST/PORT` 只用于**校验** `context.callback` 是否属于该展厅；命中后按原值回程，未命中返回 403。
+- `CALLBACK_ALLOWLIST` 必须同时匹配 scheme + host + port + 路径：默认要求路径完全一致；只有白名单条目显式以 `/` 结尾时才按目录前缀放行（`/agent/send` 不会放行 `/agent/send/x`）。`INGRESS_HOST/PORT` 匹配要求 host + 有效端口 + `/agent/send`。
+- 展厅级配置缺失但存在旧版全局 `INGRESS_HOST` / `INGRESS_PORT` 时进入兼容模式：按全局入口校验，Agent 取请求 `context.agent`。
+- 完全没有可信回程配置时回程**安全拒绝**（Narration / 动态问答返回 403），不会使用未验证的 callback；普通 IOC 指令始终不受影响。
+- 回程 Token 取 `HC_HALL_*_INGRESS_TOKEN`。仅当该展厅与全局 `INGRESS_HOST/PORT` 是同一入口（或只映射一个展厅）时才回退全局 `INGRESS_TOKEN`，多展厅不同入口之间不复用全局 Token。
+- 不同展厅的 `AGENT` 与回程入口重复只记录告警，不阻断启动；请按产品实际部署修正，避免串展厅。
 - 旧版全局 `AGENT` 仅在 `HC_TOKEN_MAP` 只映射一个展厅时作为 Agent 兜底；多展厅模式不会用全局 Agent 覆盖展厅身份。
 
 三个展厅的配置示例（`HC-A7K9P2` / `HC-B4M8Q1` / `HC-C6N3R5`，数量可按产品实际展厅动态增加）：
@@ -114,7 +114,7 @@ HC_HALL_HC_C6N3R5_TO=<C接收方JID>
     "agent": "hc-agent",
     "reply_to": "user@example.com",
     "groupchat": false,
-    "callback": "http://<该展厅回程主机>:<该展厅回程端口>/agent/send",
+    "callback": "<RUISI实际回程地址，如 https://host:port/agent/send>",
     "timestamp": "2026-08-24T20:00:00Z"
   },
   "commands": [
@@ -123,7 +123,7 @@ HC_HALL_HC_C6N3R5_TO=<C接收方JID>
 }
 ```
 
-`context` 会被标准化为不可变副本（`agent`、`replyTo`、`groupchat`、`callback`、`timestamp`）。`agent`、`reply_to`、`callback` 必须为非空字符串；`callback` 只允许 `http://`，且必须与会话展厅可信 Ingress 一致；`groupchat` 缺失时为 `false`。
+`context` 会被标准化为不可变副本（`agent`、`replyTo`、`groupchat`、`callback`、`timestamp`）。`agent`、`reply_to`、`callback` 必须为非空字符串；`callback` 允许 `http://` 或 `https://`，且必须与会话展厅可信回程配置一致；`groupchat` 缺失时为 `false`。
 
 ## MQTT 单站信封
 
@@ -144,7 +144,7 @@ HC_HALL_HC_C6N3R5_TO=<C接收方JID>
 
 ## Narration 与动态问答
 
-Narration 必须使用 envelope 并提供可回程的 context（`agent`、`reply_to`、`callback`）。执行器会按展厅配置覆盖可信 Agent、固定回程地址并携带该展厅回程 Token。
+Narration 必须使用 envelope 并提供可回程的 context（`agent`、`reply_to`、`callback`）。执行器会按展厅配置覆盖可信 Agent、原样使用 RUISI 回程地址并携带该展厅回程 Token。
 
 | 中文 action | 前端 capability | 结束时动作 |
 | --- | --- | --- |
@@ -161,9 +161,9 @@ Narration 必须使用 envelope 并提供可回程的 context（`agent`、`reply
 ## RUISI callback 协议
 
 ```text
-POST http://<HC_HALL_展厅_INGRESS_HOST>:<HC_HALL_展厅_INGRESS_PORT>/agent/send
+POST <RUISI context.callback 原值，如 http(s)://host:port/agent/send>
 Content-Type: application/json
-X-Auth-Token: <HC_HALL_展厅_INGRESS_TOKEN>
+X-Auth-Token: <HC_HALL_展厅_INGRESS_TOKEN，缺省回退全局 INGRESS_TOKEN>
 ```
 
 ```json
@@ -193,7 +193,7 @@ node scripts/send-test-callback.js 'HC callback test'
 npm test
 ```
 
-当前 `npm test` 共 187 项，全部使用本地 MQTT/mock HTTP server，不依赖真实 RUISI Ingress。多展厅用例见 `test/multi-hall.test.js`。
+当前 `npm test` 共 193 项，全部使用本地 MQTT/mock HTTP server，不依赖真实 RUISI Ingress。多展厅用例见 `test/multi-hall.test.js`，回程协议回归见 `test/hall-binding.test.js`。
 
 ## 仓库与边界
 

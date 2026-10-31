@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createHallBinder, isTrustedCallback } = require('../src/hall-binding');
+const {
+  createHallBinder, isTrustedCallback, isCallbackAllowed, parseCallbackAllowlist
+} = require('../src/hall-binding');
 const { createExhibitionAuth } = require('../src/exhibition-auth');
 const { createApp } = require('../src/server');
 const { readConfig } = require('../src/config');
@@ -93,14 +95,15 @@ function envelope(callback, agent = 'spoofed-agent') {
   };
 }
 
-test('isTrustedCallback matches exactly http + configured host + port + /agent/send', () => {
+test('isTrustedCallback matches http/https + configured host + port + /agent/send', () => {
   const target = hall(HALL_A, 'trusted-agent-a', CALLBACK_A);
   assert.equal(isTrustedCallback(CALLBACK_A, target), true);
-  assert.equal(isTrustedCallback('https://callback-a.example:9000/agent/send', target), false);
+  assert.equal(isTrustedCallback('https://callback-a.example:9000/agent/send', target), true);
   assert.equal(isTrustedCallback('http://other.example:9000/agent/send', target), false);
   assert.equal(isTrustedCallback('http://callback-a.example:9001/agent/send', target), false);
   assert.equal(isTrustedCallback('http://callback-a.example:9000/agent/send/extra', target), false);
   assert.equal(isTrustedCallback('http://callback-a.example:9000/other', target), false);
+  assert.equal(isTrustedCallback('https://callback-a.example:9443/agent/send', target), false);
   assert.equal(isTrustedCallback('file:///tmp/x', target), false);
   assert.equal(isTrustedCallback('not-a-url', target), false);
   assert.equal(isTrustedCallback('', target), false);
@@ -257,10 +260,9 @@ test('readConfig keeps starting when a mapped exhibition lacks ingress binding',
     HC_HALL_HALL_B_INGRESS_TOKEN: 'out-token-b'
   };
   const partial = readConfig(base);
-  assert.deepEqual([...partial.exhibitionHalls.keys()], [HALL_A, HALL_B]);
-  assert.deepEqual(partial.exhibitionHallIssues, [
-    { exhibitionId: HALL_C, error: 'missing required environment variable: HC_HALL_HALL_C_INGRESS_HOST' }
-  ]);
+  assert.deepEqual([...partial.exhibitionHalls.keys()], [HALL_A, HALL_B, HALL_C]);
+  assert.equal(partial.exhibitionHalls.get(HALL_C).mode, 'unverified');
+  assert.deepEqual(partial.exhibitionHallIssues, []);
   assert.equal(partial.exhibitionTokens.size, 3);
 
   const configured = readConfig({
@@ -338,13 +340,14 @@ test('legacy single-ingress env keeps ordinary commands and narration working', 
   assert.equal(crossHall.status, 403);
 });
 
-test('ordinary commands publish even when the hall has no callback configuration', async () => {
+test('ordinary commands publish and unverified narration is rejected when no callback config exists', async () => {
   const unbound = readConfig({
     ...BASE_ENV,
     HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`
   });
-  assert.deepEqual([...unbound.exhibitionHalls.keys()], []);
-  assert.equal(unbound.exhibitionHallIssues.length, 2);
+  assert.deepEqual([...unbound.exhibitionHalls.keys()], [HALL_A, HALL_B]);
+  assert.ok([...unbound.exhibitionHalls.values()].every((item) => item.mode === 'unverified'));
+  assert.deepEqual(unbound.exhibitionHallIssues, []);
 
   const started = [];
   const { app, publisher } = buildApp({ halls: unbound.exhibitionHalls, started });
@@ -360,6 +363,137 @@ test('ordinary commands publish even when the hall has no callback configuration
   assert.equal(narration.status, 403);
   assert.equal(narration.body.error, 'exhibition callback configuration is missing');
   assert.equal(started.length, 0);
+});
+
+test('allowlist matches scheme, host, port and exact path; no similar-path bypass', () => {
+  const allowlist = parseCallbackAllowlist('https://ruisi.example:8443/agent/send', 'test');
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent/send', allowlist), true);
+  // 路径相似/Method 后缀/上级路径都不允许。
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent/send/extra', allowlist), false);
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent/send-evil', allowlist), false);
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent', allowlist), false);
+  // scheme、port、host 必须同时一致。
+  assert.equal(isCallbackAllowed('http://ruisi.example:8443/agent/send', allowlist), false);
+  assert.equal(isCallbackAllowed('https://ruisi.example:9443/agent/send', allowlist), false);
+  assert.equal(isCallbackAllowed('https://ruisi-other.example:8443/agent/send', allowlist), false);
+
+  // 显式以 / 结尾的目录白名单才允许子路径。
+  const directoryAllowlist = parseCallbackAllowlist('https://ruisi.example:8443/agent/', 'test');
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent/send', directoryAllowlist), true);
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent/send/extra', directoryAllowlist), true);
+  assert.equal(isCallbackAllowed('https://ruisi.example:8443/agent-other/send', directoryAllowlist), false);
+});
+
+test('multi-hall halls never share the global ingress token across distinct targets', () => {
+  const config = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
+    HC_HALL_HALL_A_AGENT: 'agent-a',
+    HC_HALL_HALL_A_INGRESS_HOST: 'ingress-a.example',
+    HC_HALL_HALL_A_INGRESS_PORT: '9000',
+    HC_HALL_HALL_B_AGENT: 'agent-b',
+    HC_HALL_HALL_B_INGRESS_HOST: 'ingress-b.example',
+    HC_HALL_HALL_B_INGRESS_PORT: '9001',
+    HC_HALL_HALL_B_INGRESS_TOKEN: 'token-b',
+    INGRESS_HOST: 'ingress-a.example',
+    INGRESS_PORT: '9000',
+    INGRESS_TOKEN: 'global-token'
+  });
+  assert.equal(config.exhibitionHalls.get(HALL_A).ingressToken, 'global-token');
+  // B 使用自己的 Ingress 目标，不得复用 A 所在 Ingress 的全局 Token。
+  assert.equal(config.exhibitionHalls.get(HALL_B).ingressToken, 'token-b');
+
+  const noTokenB = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
+    HC_HALL_HALL_A_AGENT: 'agent-a',
+    HC_HALL_HALL_A_INGRESS_HOST: 'ingress-a.example',
+    HC_HALL_HALL_A_INGRESS_PORT: '9000',
+    HC_HALL_HALL_B_AGENT: 'agent-b',
+    HC_HALL_HALL_B_INGRESS_HOST: 'ingress-b.example',
+    HC_HALL_HALL_B_INGRESS_PORT: '9001',
+    INGRESS_HOST: 'ingress-a.example',
+    INGRESS_PORT: '9000',
+    INGRESS_TOKEN: 'global-token'
+  });
+  assert.equal(noTokenB.exhibitionHalls.get(HALL_A).ingressToken, 'global-token');
+  assert.equal(noTokenB.exhibitionHalls.get(HALL_B).ingressToken, null);
+});
+
+test('multi-hall legacy deployment sharing one global ingress may reuse the global token', () => {
+  const config = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
+    INGRESS_HOST: 'shared-ingress.example',
+    INGRESS_PORT: '18080',
+    INGRESS_TOKEN: 'shared-global-token'
+  });
+  assert.equal(config.exhibitionHalls.get(HALL_A).mode, 'legacy');
+  assert.equal(config.exhibitionHalls.get(HALL_B).mode, 'legacy');
+  assert.equal(config.exhibitionHalls.get(HALL_A).ingressToken, 'shared-global-token');
+  assert.equal(config.exhibitionHalls.get(HALL_B).ingressToken, 'shared-global-token');
+});
+
+test('legacy CALLBACK_ALLOWLIST (https) keeps the accepted 9811796 callback protocol', () => {
+  const httpsCallback = 'https://ruisi-a.example:8443/agent/send';
+  const config = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A},${TOKEN_B}:${HALL_B}`,
+    HC_HALL_HALL_A_AGENT: 'trusted-agent-a',
+    HC_HALL_HALL_A_CALLBACK_ALLOWLIST: httpsCallback,
+    HC_HALL_HALL_A_INGRESS_TOKEN: 'out-token-a'
+  });
+  const hallA = config.exhibitionHalls.get(HALL_A);
+  assert.equal(hallA.mode, 'allowlist');
+  assert.deepEqual(hallA.callbackAllowlist, [httpsCallback]);
+  assert.equal(hallA.ingressUrl, null);
+
+  const binder = createHallBinder({ halls: config.exhibitionHalls, logger: logger() });
+  const accepted = binder.bind({
+    exhibitionId: HALL_A,
+    context: { agent: 'spoofed', replyTo: 'user@example.com', callback: httpsCallback }
+  });
+  assert.equal(accepted.ok, true);
+  // 原样使用 RUISI 传入的 https 回程地址，不改写协议、主机、端口或路径。
+  assert.equal(accepted.context.callback, httpsCallback);
+  assert.equal(accepted.context.agent, 'trusted-agent-a');
+  assert.equal(accepted.context.ingressToken, 'out-token-a');
+
+  const crossHall = binder.bind({
+    exhibitionId: HALL_A,
+    context: { agent: 'spoofed', replyTo: 'user@example.com', callback: 'https://ruisi-b.example:8443/agent/send' }
+  });
+  assert.equal(crossHall.ok, false);
+  assert.equal(crossHall.status, 403);
+});
+
+test('binder keeps RUISI callback path and query untouched for trusted ingress', () => {
+  const binder = createHallBinder({ halls: buildHalls(), logger: logger() });
+  const callbackWithQuery = `${CALLBACK_A}?session=s-1`;
+  const result = binder.bind({
+    exhibitionId: HALL_A,
+    context: { agent: 'spoofed', replyTo: 'u', callback: callbackWithQuery }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.context.callback, callbackWithQuery);
+});
+
+test('binder falls back to the legacy global ingress token when the hall token is missing', () => {
+  const config = readConfig({
+    ...BASE_ENV,
+    HC_TOKEN_MAP: `${TOKEN_A}:${HALL_A}`,
+    HC_HALL_HALL_A_AGENT: 'trusted-agent-a',
+    HC_HALL_HALL_A_INGRESS_HOST: 'callback-a.example',
+    HC_HALL_HALL_A_INGRESS_PORT: '9000',
+    INGRESS_TOKEN: 'legacy-global-token'
+  });
+  const binder = createHallBinder({ halls: config.exhibitionHalls, logger: logger() });
+  const result = binder.bind({
+    exhibitionId: HALL_A,
+    context: { agent: 'spoofed', replyTo: 'u', callback: CALLBACK_A }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.context.ingressToken, 'legacy-global-token');
 });
 
 test('missing, invalid and unmapped tokens are rejected before callback binding', async () => {

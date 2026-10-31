@@ -675,6 +675,7 @@ test('readConfig accepts a valid first-phase configuration', () => {
       ingressPort: 29876,
       ingressToken: 'trusted-ingress-token',
       to: null,
+      callbackAllowlist: [],
       ingressUrl: 'http://127.0.0.1:29876/agent/send'
     }]]),
     exhibitionHallIssues: [],
@@ -684,20 +685,25 @@ test('readConfig accepts a valid first-phase configuration', () => {
 
 test('readConfig degrades callback binding instead of blocking startup when per-exhibition config is incomplete', () => {
   const missingAgent = readConfig({ ...validEnv, HC_HALL_TEST_HALL_AGENT: '' });
-  assert.deepEqual(missingAgent.exhibitionHalls, new Map());
-  assert.match(missingAgent.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_AGENT/);
+  assert.equal(missingAgent.exhibitionHalls.get(TEST_HALL).agent, null);
+  assert.equal(missingAgent.exhibitionHalls.get(TEST_HALL).mode, 'isolated');
+  assert.deepEqual(missingAgent.exhibitionHallIssues, []);
 
   const missingHost = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_HOST: '' });
-  assert.match(missingHost.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_INGRESS_HOST/);
+  assert.equal(missingHost.exhibitionHalls.get(TEST_HALL).mode, 'unverified');
+  assert.equal(missingHost.exhibitionHalls.get(TEST_HALL).ingressUrl, null);
+  assert.deepEqual(missingHost.exhibitionHallIssues, []);
 
   const missingPort = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '' });
-  assert.match(missingPort.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_INGRESS_PORT/);
+  assert.equal(missingPort.exhibitionHalls.get(TEST_HALL).mode, 'unverified');
+  assert.deepEqual(missingPort.exhibitionHallIssues, []);
 
   const invalidPort = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_PORT: '70000' });
   assert.match(invalidPort.exhibitionHallIssues[0].error, /INGRESS_PORT/);
 
   const missingToken = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: '' });
-  assert.match(missingToken.exhibitionHallIssues[0].error, /HC_HALL_TEST_HALL_INGRESS_TOKEN/);
+  assert.equal(missingToken.exhibitionHalls.get(TEST_HALL).ingressToken, null);
+  assert.deepEqual(missingToken.exhibitionHallIssues, []);
 
   const config = readConfig({ ...validEnv, HC_HALL_TEST_HALL_INGRESS_TOKEN: 'hall-token' });
   assert.equal(config.exhibitionHalls.get(TEST_HALL).ingressToken, 'hall-token');

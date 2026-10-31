@@ -237,23 +237,25 @@ test('body exhibitionId and spoofed agent cannot override token-derived hall con
   }
 });
 
-test('missing per-hall config disables only that hall callback and never falls back to another hall', async () => {
+test('missing per-hall config degrades only that hall and never borrows another hall target', async () => {
   const ingressA = await mockIngress();
   const ingressB = await mockIngress();
   const ingressC = await mockIngress();
   try {
-    for (const [overrides, pattern] of [
-      [{ HC_HALL_HC_C6N3R5_INGRESS_PORT: '' }, /HC_HALL_HC_C6N3R5_INGRESS_PORT/],
-      [{ HC_HALL_HC_C6N3R5_INGRESS_TOKEN: '' }, /HC_HALL_HC_C6N3R5_INGRESS_TOKEN/],
-      [{ HC_HALL_HC_C6N3R5_AGENT: '' }, /HC_HALL_HC_C6N3R5_AGENT/]
-    ]) {
+    const cases = [
+      [{ HC_HALL_HC_C6N3R5_INGRESS_PORT: '' }, 'unverified'],
+      [{ HC_HALL_HC_C6N3R5_INGRESS_TOKEN: '' }, 'isolated'],
+      [{ HC_HALL_HC_C6N3R5_AGENT: '' }, 'isolated']
+    ];
+    for (const [overrides, expectedMode] of cases) {
       const config = readConfig(buildEnv(ingressA, ingressB, ingressC, overrides));
-      assert.deepEqual([...config.exhibitionHalls.keys()], [HALL_A, HALL_B]);
-      assert.equal(config.exhibitionHallIssues.length, 1);
-      assert.equal(config.exhibitionHallIssues[0].exhibitionId, HALL_C);
-      assert.match(config.exhibitionHallIssues[0].error, pattern);
+      assert.deepEqual([...config.exhibitionHalls.keys()], [HALL_A, HALL_B, HALL_C]);
+      assert.equal(config.exhibitionHalls.get(HALL_C).mode, expectedMode);
       assert.equal(config.exhibitionHalls.get(HALL_A).ingressPort, ingressA.port);
       assert.equal(config.exhibitionHalls.get(HALL_B).ingressPort, ingressB.port);
+      // 不得回退到其它展厅的 Ingress。
+      assert.notEqual(config.exhibitionHalls.get(HALL_C).ingressUrl, ingressA.url);
+      assert.notEqual(config.exhibitionHalls.get(HALL_C).ingressUrl, ingressB.url);
     }
   } finally {
     await ingressA.close();
@@ -262,7 +264,7 @@ test('missing per-hall config disables only that hall callback and never falls b
   }
 });
 
-test('a token whose hall callback is disabled still publishes ordinary IOC commands', async () => {
+test('a hall without a trusted agent still publishes ordinary commands and uses its own callback', async () => {
   const ingressA = await mockIngress();
   const ingressB = await mockIngress();
   const ingressC = await mockIngress();
@@ -275,9 +277,12 @@ test('a token whose hall callback is disabled still publishes ordinary IOC comma
     assert.equal(publisher.calls.length, 1);
     assert.equal(JSON.parse(publisher.calls[0]).exhibitionId, HALL_C);
 
-    const narration = await post(app, narrationEnvelope(ingressC.url, 'spoofed-agent'), TOKEN_C);
-    assert.equal(narration.status, 403);
-    assert.equal(narration.body.error, 'exhibition callback configuration is missing');
+    const narration = await post(app, narrationEnvelope(ingressC.url, 'request-agent'), TOKEN_C);
+    assert.equal(narration.status, 202);
+    await waitFor(() => ingressC.requests.length === 1);
+    assert.equal(ingressC.requests[0].body.agent, 'request-agent');
+    assert.equal(ingressA.requests.length, 0);
+    assert.equal(ingressB.requests.length, 0);
   } finally {
     await ingressA.close();
     await ingressB.close();

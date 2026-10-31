@@ -243,10 +243,15 @@ function start() {
   const logger = createLogger();
   const exhibitionAuth = createExhibitionAuth({ tokenMap: config.exhibitionTokens, logger });
   const hallBinder = createHallBinder({ halls: config.exhibitionHalls, logger });
+  const hallModes = [...config.exhibitionHalls.values()].map((hall) => hall.mode);
   const hallStatus = {
     bound: config.exhibitionHalls.size,
-    isolated: [...config.exhibitionHalls.values()].filter((hall) => hall.mode === 'isolated').length,
-    legacy: [...config.exhibitionHalls.values()].filter((hall) => hall.mode === 'legacy').length,
+    isolated: hallModes.filter((mode) => mode === 'isolated').length,
+    legacy: hallModes.filter((mode) => mode === 'legacy').length,
+    allowlist: hallModes.filter((mode) => mode === 'allowlist').length,
+    unverified: hallModes.filter((mode) => mode === 'unverified').length,
+    invalid: config.exhibitionHallIssues.length,
+    // 兼容旧字段：配置非法的展厅无法建立可信回程。
     callbackDisabled: config.exhibitionHallIssues.length
   };
   logger.info('[执行器] 正在启动练秋湖IOC执行器', {
@@ -263,10 +268,10 @@ function start() {
       to: hall.to || null
     }))
   });
-  // 普通 IOC 指令不依赖回程配置：这里只降级回程业务（Narration / 动态问答），
+  // 普通 IOC 指令不依赖回程配置：回程配置只影响 Narration / 动态问答，
   // 不能让缺失或冲突的回程配置阻断启动与 MQTT 指令发布。
   for (const issue of config.exhibitionHallIssues) {
-    logger.warn('[执行器] 展厅回程未启用，普通指令仍正常发布，回程业务将返回403', issue);
+    logger.warn('[执行器] 展厅回程配置非法，普通指令仍正常发布，回程业务将返回403', issue);
   }
   for (const warning of config.exhibitionHallWarnings) {
     logger.warn('[执行器] 展厅回程配置告警', warning);
